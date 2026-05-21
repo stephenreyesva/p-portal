@@ -352,26 +352,8 @@ tr:hover td{background:#fafafa;}
     </div>
   </div>
 
-  <div class="sb-nav">
-    <div class="sb-nav-label">Menu</div>
-    <button class="sb-nav-btn active" id="nav-dashboard" onclick="showPage('dashboard')">
-      <span class="icon">📊</span> Dashboard
-    </button>
-    <button class="sb-nav-btn" id="nav-clients" onclick="showPage('clients')">
-      <span class="icon">👥</span> All Clients
-    </button>
-    <button class="sb-nav-btn" id="nav-timesheet" onclick="showPage('timesheet')">
-      <span class="icon">⏱</span> Timesheet
-    </button>
-    <button class="sb-nav-btn" id="nav-invoices" onclick="showPage('invoices')">
-      <span class="icon">🧾</span> Invoices
-    </button>
-
-    <div class="sb-nav-label" style="margin-top:10px;">Active Client</div>
-    <div class="clients-list" id="clients-list"></div>
-    <button class="sb-add-client" onclick="openNewClientWizard()">
-      ＋ New Client
-    </button>
+  <div class="sb-nav" id="sb-nav-area">
+    <!-- Rendered dynamically by renderSidebar() -->
   </div>
 
   <div class="sb-sync">
@@ -385,6 +367,9 @@ tr:hover td{background:#fafafa;}
       <button class="sb-sync-btn sb-sync-dl" onclick="downloadBackup()">⬇</button>
     </div>
     <div class="sb-sync-status" id="sync-status">Last sync: never</div>
+    <button class="sb-nav-btn" onclick="doLogout()" style="margin-top:6px;color:var(--red);font-size:12px;width:100%;">
+      <span class="icon">🚪</span> Logout
+    </button>
   </div>
 </div>
 
@@ -399,8 +384,8 @@ tr:hover td{background:#fafafa;}
   <!-- Top bar -->
   <div class="top-bar">
     <div>
-      <div class="top-bar-title" id="top-title">Dashboard</div>
-      <div class="top-bar-sub" id="top-sub">Overview</div>
+      <div class="top-bar-title" id="top-title">All Clients</div>
+      <div class="top-bar-sub" id="top-sub">Select a client to get started</div>
     </div>
     <div class="top-bar-actions" id="top-actions"></div>
   </div>
@@ -408,12 +393,12 @@ tr:hover td{background:#fafafa;}
   <div class="content">
 
     <!-- DASHBOARD PAGE -->
-    <div class="page active" id="page-dashboard">
+    <div class="page" id="page-dashboard">
       <div id="dash-content"></div>
     </div>
 
     <!-- CLIENTS PAGE -->
-    <div class="page" id="page-clients">
+    <div class="page active" id="page-clients">
       <div id="clients-content"></div>
     </div>
 
@@ -433,8 +418,8 @@ tr:hover td{background:#fafafa;}
 <!-- Mobile Nav -->
 <div id="mob-nav">
   <div class="mob-nav-inner">
-    <button class="mob-nav-btn active" onclick="showPage('dashboard')"><span class="mn-icon">📊</span>Dashboard</button>
-    <button class="mob-nav-btn" onclick="showPage('clients')"><span class="mn-icon">👥</span>Clients</button>
+    <button class="mob-nav-btn" onclick="goHome()"><span class="mn-icon">👥</span>Clients</button>
+    <button class="mob-nav-btn" onclick="showPage('dashboard')"><span class="mn-icon">📊</span>Dashboard</button>
     <button class="mob-nav-btn" onclick="showPage('timesheet')"><span class="mn-icon">⏱</span>Timesheet</button>
     <button class="mob-nav-btn" onclick="showPage('invoices')"><span class="mn-icon">🧾</span>Invoices</button>
     <button class="mob-nav-btn" style="color:var(--red)" onclick="doLogout()"><span class="mn-icon">🚪</span>Logout</button>
@@ -531,10 +516,11 @@ function init(){
   if(!appData.clients.find(c=>c.repo==='allriot')){
     addDefaultAllriotClient();
   }
-  if(!appData.activeClientId && appData.clients.length>0){
-    appData.activeClientId = appData.clients[0].id;
-  }
+  // Default: no client selected — home is All Clients view
+  // Only restore activeClientId if it was explicitly set in a previous session
+  // (we leave it as null on first load so "All Clients" is the default)
   renderApp();
+  showPage('clients');
   // Auto-load from GitHub
   if(ghToken && !_autoLoaded){
     _autoLoaded = true;
@@ -554,47 +540,107 @@ function addDefaultAllriotClient(){
 
 // ─── RENDER APP ─────────────────────────────────────────────────────────────
 function renderApp(){
-  renderClientsList();
+  renderSidebar();
   renderCurrentPage();
   updateSyncStatus();
 }
 
-function renderClientsList(){
-  const container = document.getElementById('clients-list');
-  container.innerHTML = '';
-  appData.clients.forEach(c=>{
-    const btn = document.createElement('button');
-    btn.className = 'client-item'+(c.id===appData.activeClientId?' active':'');
-    const cd = appData.clientData[c.id]||{timeEntries:[],invoices:[]};
-    const pending = (cd.invoices||[]).filter(i=>i.status==='pending'||i.status==='sent').length;
-    btn.innerHTML = `
-      <div class="client-dot c${c.color||0}"></div>
-      <span class="client-item-name">${c.name.split(' ')[0]}<br><span style="font-size:10px;opacity:.6">${c.company||''}</span></span>
-      ${pending ? `<span class="client-item-badge">${pending}</span>` : ''}
+function renderSidebar(){
+  const area = document.getElementById('sb-nav-area');
+  if(!area) return;
+  const ac = appData.activeClientId ? appData.clients.find(c=>c.id===appData.activeClientId) : null;
+
+  if(!ac){
+    // HOME MODE — show all clients list + Add button
+    area.innerHTML = `
+      <div class="sb-nav-label">Clients</div>
+      <div id="clients-list"></div>
+      <button class="sb-add-client" onclick="openNewClientWizard()">＋ New Client</button>
     `;
-    btn.onclick = ()=>switchClient(c.id);
-    container.appendChild(btn);
-  });
+    const container = document.getElementById('clients-list');
+    if(appData.clients.length===0){
+      container.innerHTML=`<div style="font-size:12px;color:var(--text3);padding:8px 12px;">No clients yet.</div>`;
+    } else {
+      appData.clients.forEach(c=>{
+        const btn = document.createElement('button');
+        btn.className = 'client-item';
+        const cd = appData.clientData[c.id]||{timeEntries:[],invoices:[]};
+        const pending = (cd.invoices||[]).filter(i=>i.status==='pending'||i.status==='sent').length;
+        btn.innerHTML = `
+          <div class="client-dot c${c.color||0}"></div>
+          <span class="client-item-name">${c.name.split(' ')[0]}<br><span style="font-size:10px;opacity:.6">${c.company||''}</span></span>
+          ${pending ? `<span class="client-item-badge">${pending}</span>` : ''}
+        `;
+        btn.onclick = ()=>switchClient(c.id);
+        container.appendChild(btn);
+      });
+    }
+  } else {
+    // CLIENT MODE — show back button + client-specific nav
+    area.innerHTML = `
+      <button class="sb-nav-btn" id="nav-back-home" onclick="goHome()" style="margin-bottom:4px;color:var(--text3);font-size:12px;">
+        <span class="icon">←</span> All Clients
+      </button>
+      <div style="padding:6px 12px 10px;border-bottom:1px solid var(--border);margin-bottom:8px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div class="client-dot c${ac.color||0}" style="width:10px;height:10px;border-radius:50%;flex-shrink:0;"></div>
+          <div>
+            <div style="font-size:13px;font-weight:600;color:var(--text)">${ac.name.split(' ')[0]}</div>
+            <div style="font-size:10px;color:var(--text3)">${ac.company||''}</div>
+          </div>
+        </div>
+      </div>
+      <div class="sb-nav-label">Menu</div>
+      <button class="sb-nav-btn ${_currentPage==='dashboard'?'active':''}" id="nav-dashboard" onclick="showPage('dashboard')">
+        <span class="icon">📊</span> Dashboard
+      </button>
+      <button class="sb-nav-btn ${_currentPage==='timesheet'?'active':''}" id="nav-timesheet" onclick="showPage('timesheet')">
+        <span class="icon">⏱</span> Timesheet
+      </button>
+      <button class="sb-nav-btn ${_currentPage==='invoices'?'active':''}" id="nav-invoices" onclick="showPage('invoices')">
+        <span class="icon">🧾</span> Invoices
+      </button>
+    `;
+  }
+}
+
+function goHome(){
+  autoSaveNow();
+  appData.activeClientId = null;
+  saveLocal();
+  _currentPage = 'clients';
+  renderApp();
+  // make sure page-clients is visible
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.getElementById('page-clients').classList.add('active');
+}
+
+function renderClientsList(){
+  // Legacy stub — now handled by renderSidebar
+  renderSidebar();
 }
 
 function switchClient(id){
-  if(appData.activeClientId === id) return;
   autoSaveNow();
   appData.activeClientId = id;
+  _currentPage = 'dashboard';
   saveLocal();
   renderApp();
-  showPage(getCurrentPage());
-  toast(`Switched to ${activeClient().name}`, 'info');
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.getElementById('page-dashboard').classList.add('active');
+  toast(`Opened: ${activeClient().name}`, 'info');
   // Auto-load this client's data from GH
   if(ghToken) loadClientDataFromGH(id);
 }
 
 function activeClient(){
-  return appData.clients.find(c=>c.id===appData.activeClientId) || appData.clients[0];
+  if(!appData.activeClientId) return null;
+  return appData.clients.find(c=>c.id===appData.activeClientId) || null;
 }
 
 function activeData(){
   const id = appData.activeClientId;
+  if(!id) return {timeEntries:[], invoices:[]};
   if(!appData.clientData[id]) appData.clientData[id] = {timeEntries:[],invoices:[]};
   return appData.clientData[id];
 }
@@ -606,16 +652,13 @@ function showPage(page){
   _currentPage = page;
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById('page-'+page).classList.add('active');
-  // sidebar nav
-  document.querySelectorAll('.sb-nav-btn').forEach(b=>b.classList.remove('active'));
-  const btn = document.getElementById('nav-'+page);
-  if(btn) btn.classList.add('active');
   // mob nav
   document.querySelectorAll('.mob-nav-btn').forEach(b=>b.classList.remove('active'));
   const mnBtns = document.querySelectorAll('.mob-nav-btn');
   const pageIndex = {dashboard:0,clients:1,timesheet:2,invoices:3};
   if(pageIndex[page]!==undefined) mnBtns[pageIndex[page]]?.classList.add('active');
 
+  renderSidebar();
   renderCurrentPage();
 }
 
@@ -623,7 +666,11 @@ function renderCurrentPage(){
   const c = activeClient();
   const pageNames = {dashboard:'Dashboard',clients:'All Clients',timesheet:'Timesheet',invoices:'Invoices'};
   document.getElementById('top-title').textContent = pageNames[_currentPage]||'';
-  document.getElementById('top-sub').textContent = c ? `Active: ${c.name} — ${c.company||''}` : 'No client selected';
+  if(_currentPage==='clients' || !c){
+    document.getElementById('top-sub').textContent = `${appData.clients.length} client${appData.clients.length!==1?'s':''}`;
+  } else {
+    document.getElementById('top-sub').textContent = `${c.name} — ${c.company||''}`;
+  }
 
   if(_currentPage==='dashboard') buildDashboard();
   else if(_currentPage==='clients') buildClientsPage();
@@ -634,6 +681,11 @@ function renderCurrentPage(){
 // ─── DASHBOARD ───────────────────────────────────────────────────────────────
 function buildDashboard(){
   const c = activeClient();
+  if(!c){
+    // No client selected — redirect to All Clients
+    buildClientsPage();
+    return;
+  }
   const cd = activeData();
   const entries = cd.timeEntries||[];
   const invoices = cd.invoices||[];
@@ -910,9 +962,8 @@ function buildClientsPage(){
         </div>
       </div>
       <div class="client-card-actions">
-        ${!isActive?`<button class="btn btn-ghost btn-sm" onclick="switchClient('${c.id}')">Switch</button>`:''}
         <button class="btn btn-ghost btn-sm" onclick="editClient('${c.id}')">✏️ Edit</button>
-        <button class="btn btn-primary btn-sm" onclick="switchClient('${c.id}');showPage('dashboard')">Open</button>
+        <button class="btn btn-primary btn-sm" onclick="switchClient('${c.id}')">Open →</button>
       </div>
     `;
     grid.appendChild(card);
@@ -927,6 +978,7 @@ let tsYear = new Date().getFullYear();
 
 function buildTimesheet(){
   const c = activeClient();
+  if(!c){ buildClientsPage(); return; }
   const cd = activeData();
   const entries = (cd.timeEntries||[]).sort((a,b)=>b.date.localeCompare(a.date));
 
@@ -1256,6 +1308,7 @@ function openEditDayEntries(dateStr){
 // ─── INVOICES ─────────────────────────────────────────────────────────────────
 function buildInvoices(){
   const c=activeClient();
+  if(!c){ buildClientsPage(); return; }
   const cd=activeData();
   const invoices=(cd.invoices||[]).sort((a,b)=>b.number-a.number);
 
@@ -1906,7 +1959,7 @@ async function loadFromGH(silent=false){
         if(dr.ok){
           const dj=await dr.json();
           const dd=JSON.parse(decodeURIComponent(escape(atob(dj.content))));
-          appData.clientData[c.id]={timeEntries:dd.timeEntries||[],invoices:dd.invoices||[]};
+          appData.clientData[c.id]={timeEntries:dd.timeEntries||dd.entries||[],invoices:dd.invoices||[]};
         }
       } catch(e){}
     }
