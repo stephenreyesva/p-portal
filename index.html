@@ -214,13 +214,15 @@ tfoot td{padding:10px 14px;font-size:12px;background:var(--bg);}
 
 /* Print */
 @media print{
-  @page{ size:A4; margin:12mm 10mm 12mm 10mm; }
-  html,body{ width:210mm; margin:0 auto; }
+  @page{ size:A4; margin:15mm 20mm; }
+  html,body{ width:210mm; margin:0 auto; background:#fff!important; }
   .sidebar,.no-print,.admin-bar,.sync-bar{ display:none!important; }
-  .main{ margin-left:0!important; padding:0!important; max-width:100%!important; }
-  .card{ border:1px solid #ccc!important; break-inside:avoid; }
-  /* Invoice detail print: hide back/action bar, show only doc card */
+  .main{ margin-left:0!important; padding:0!important; max-width:210mm!important; margin:0 auto!important; }
+  .card{ border:1px solid #ddd!important; break-inside:avoid; box-shadow:none!important; }
   .inv-print-hide{ display:none!important; }
+  .page-header .btn, .page-header button{ display:none!important; }
+  table{ width:100%!important; }
+  tbody tr:hover td{ background:transparent!important; }
 }
 
 /* ── Mobile bottom nav ── */
@@ -280,12 +282,15 @@ tfoot td{padding:10px 14px;font-size:12px;background:var(--bg);}
 
 /* Print */
 @media print{
-  @page{ size:A4; margin:12mm 10mm 12mm 10mm; }
-  html,body{ width:210mm; margin:0 auto; }
+  @page{ size:A4; margin:15mm 20mm; }
+  html,body{ width:210mm; margin:0 auto; background:#fff!important; }
   .sidebar,.mob-nav,.no-print,.admin-bar,.sync-bar{ display:none!important; }
-  .main{ margin-left:0!important; padding:0!important; max-width:100%!important; }
-  .card{ border:1px solid #ccc!important; break-inside:avoid; }
+  .main{ margin-left:0!important; padding:0!important; max-width:210mm!important; margin:0 auto!important; }
+  .card{ border:1px solid #ddd!important; break-inside:avoid; box-shadow:none!important; }
   .inv-print-hide{ display:none!important; }
+  .page-header .btn, .page-header button{ display:none!important; }
+  table{ width:100%!important; }
+  tbody tr:hover td{ background:transparent!important; }
 }
 .tp-trigger{
   width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);
@@ -489,11 +494,24 @@ function ensureDefaultClient(){
   }
 }
 
-// ── GITHUB ───────────────────────────────────────────────────────────────────
-function ghHeaders(){ return {'Authorization':'Bearer '+ghToken,'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'}; }
-function hasToken(){ return !!ghToken.trim(); }
-function saveToken(){ const val=document.getElementById('gh-token-input')?.value?.trim(); if(!val){toast('Enter a token first');return;} ghToken=val; sessionStorage.setItem('pv_gh_token',val); localStorage.setItem('pv_gh_token',val); toast('Token saved \u2713'); render(); }
-function loadTokenFile(input){ const file=input.files[0]; if(!file) return; const reader=new FileReader(); reader.onload=e=>{ const val=(e.target.result||'').trim(); if(!val){toast('Empty file');return;} ghToken=val; sessionStorage.setItem('pv_gh_token',val); localStorage.setItem('pv_gh_token',val); toast('\u2713 Token loaded from file!'); render(); }; reader.readAsText(file); }
+// ── GITHUB — per-client tokens ────────────────────────────────────────────────
+function getClientToken(clientId){
+  const c=appState.clients.find(cl=>cl.id===clientId);
+  return (c&&c.token)?c.token.trim():'';
+}
+function setClientToken(clientId,val){
+  const c=appState.clients.find(cl=>cl.id===clientId);
+  if(!c) return;
+  c.token=val.trim();
+  saveLocal();
+}
+function ghHeadersFor(clientId){
+  const tok=getClientToken(clientId)||ghToken;
+  return {'Authorization':'Bearer '+tok,'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'};
+}
+function hasTokenFor(clientId){ return !!(getClientToken(clientId)||ghToken).trim(); }
+function saveToken(){ const val=document.getElementById('gh-token-input')?.value?.trim(); if(!val){toast('Enter a token first');return;} ghToken=val; sessionStorage.setItem('pv_gh_token',val); localStorage.setItem('pv_gh_token',val); toast('Token saved'); }
+function loadTokenFile(input,clientId){ const file=input.files[0]; if(!file) return; const reader=new FileReader(); reader.onload=e=>{ const val=(e.target.result||'').trim(); if(!val){toast('Empty file');return;} setClientToken(clientId,val); toast('\u2713 Token saved for this client!'); render(); }; reader.readAsText(file); }
 
 async function loadClientDataFromGH(clientId,silent){
   const c=appState.clients.find(cl=>cl.id===clientId); if(!c||!c.repo) return;
@@ -509,17 +527,18 @@ async function loadClientDataFromGH(clientId,silent){
   }catch(e){ if(!silent) toast('Load failed'); return false; }
 }
 async function publishClientDataToGH(clientId){
-  if(!hasToken()){toast('\u26a0\ufe0f Upload your token first');return false;}
+  if(!hasTokenFor(clientId)){toast('\u26a0\ufe0f Add a GitHub token to this client first');return false;}
   const c=appState.clients.find(cl=>cl.id===clientId); if(!c||!c.repo){toast('No repo configured');return false;}
   const cd=appState.clientData[clientId]||{entries:[],invoices:[]};
   const fileContent=btoa(unescape(encodeURIComponent(JSON.stringify({entries:cd.entries||[],invoices:cd.invoices||[]},null,2))));
   const apiUrl=`https://api.github.com/repos/${GH_USER}/${c.repo}/contents/data.json`;
+  const headers=ghHeadersFor(clientId);
   try{
-    let sha=''; const ex=await fetch(apiUrl,{headers:ghHeaders()});
-    if(ex.status===401){toast('\u274c Token rejected');return false;}
+    let sha=''; const ex=await fetch(apiUrl,{headers});
+    if(ex.status===401){toast('\u274c Token rejected — check the token for this client');return false;}
     if(ex.ok){const j=await ex.json();sha=j.sha||'';}
     const body={message:'update tracker data',content:fileContent,branch:'main'}; if(sha) body.sha=sha;
-    const res=await fetch(apiUrl,{method:'PUT',headers:ghHeaders(),body:JSON.stringify(body)});
+    const res=await fetch(apiUrl,{method:'PUT',headers,body:JSON.stringify(body)});
     if(res.ok){ localStorage.setItem('sr_last_sync_'+clientId,Date.now().toString()); toast('\u2713 Published! Client view will update shortly.'); return true; }
     else{ const e=await res.json().catch(()=>({})); toast('Publish error ('+res.status+'): '+(e.message||'unknown')); return false; }
   }catch(e){ toast('Publish failed'); return false; }
@@ -688,33 +707,18 @@ function buildSidebar(){
       btn.addEventListener('click',()=>{ appState.page=item.id; appState.invoiceDetailId=null; render(); }); sb.appendChild(btn);
     });
     const cdet=document.createElement('div'); cdet.style.cssText='padding:8px 10px;margin-top:6px;background:var(--bg);border-radius:var(--radius-sm);font-size:11px;color:var(--muted);';
+    const acTok=ac.token?ac.token.trim():'';
     cdet.innerHTML=`<div style="font-weight:500;color:var(--text);font-size:12px;margin-bottom:4px;">${ac.name}</div><div>${ac.email||''}</div><div style="color:var(--teal)">${ac.website||''}</div><div>Rate: $${ac.rate||0}/hr</div>`;
+    const tokLine=document.createElement('div'); tokLine.style.cssText='margin-top:6px;padding-top:6px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:4px;';
+    const tokBadge=document.createElement('span');
+    tokBadge.style.cssText=`font-size:10px;padding:1px 6px;border-radius:100px;background:${acTok?'var(--teal-bg)':'var(--red-bg)'};color:${acTok?'var(--teal-d)':'var(--red)'};`;
+    tokBadge.textContent=acTok?'✓ Token set':'⚠ No token';
+    const manageLink=document.createElement('button'); manageLink.style.cssText='background:none;border:none;font-size:10px;color:var(--teal);cursor:pointer;padding:0;font-family:inherit;text-decoration:underline;text-underline-offset:2px;';
+    manageLink.textContent='Manage'; manageLink.addEventListener('click',goHome);
+    tokLine.appendChild(tokBadge); tokLine.appendChild(manageLink); cdet.appendChild(tokLine);
     sb.appendChild(cdet);
   }
   const bot=document.createElement('div'); bot.className='sidebar-bottom';
-  // Token section — file attach + status display (same as admin.html)
-  const tokSection=document.createElement('div'); tokSection.style.cssText='margin-bottom:8px;';
-  const tokStatus=document.createElement('div'); tokStatus.style.cssText='font-size:11px;color:var(--muted);margin-bottom:5px;display:flex;align-items:center;justify-content:space-between;';
-  const tokenMasked=ghToken?'●●●● '+ghToken.slice(-4):'No token saved';
-  const tokenColor=ghToken?'var(--teal)':'var(--red)';
-  tokStatus.innerHTML=`<span>GitHub Token: <span style="color:${tokenColor};font-weight:600">${tokenMasked}</span></span>`;
-  tokSection.appendChild(tokStatus);
-  // File attach button row
-  const tokFileRow=document.createElement('div'); tokFileRow.style.cssText='display:flex;gap:5px;align-items:center;margin-bottom:5px;';
-  const fileLabel=document.createElement('label'); fileLabel.style.cssText='flex:1;background:var(--bg);border:1px solid var(--border);color:var(--muted);border-radius:var(--radius-sm);padding:5px 8px;font-size:11px;cursor:pointer;text-align:center;transition:all .15s;display:flex;align-items:center;justify-content:center;gap:5px;';
-  fileLabel.innerHTML=`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg> Attach token.txt`;
-  const fileInput=document.createElement('input'); fileInput.type='file'; fileInput.accept='.txt,.token,text/*'; fileInput.style.display='none'; fileInput.id='gh-token-file';
-  fileInput.addEventListener('change',()=>loadTokenFile(fileInput));
-  fileLabel.appendChild(fileInput);
-  // Manual input toggle
-  const manualBtn=document.createElement('button'); manualBtn.className='sb-token-save'; manualBtn.style.cssText='font-size:10px;padding:5px 7px;white-space:nowrap;'; manualBtn.textContent='Type it';
-  const manualRow=document.createElement('div'); manualRow.style.cssText='display:none;gap:5px;margin-bottom:4px;'; manualRow.id='token-manual-row';
-  const tokInp=document.createElement('input'); tokInp.type='password'; tokInp.className='sb-token-input'; tokInp.id='gh-token-input'; tokInp.placeholder='ghp_... token'; tokInp.value=ghToken||'';
-  const tokSave=document.createElement('button'); tokSave.className='sb-token-save'; tokSave.textContent='Save'; tokSave.addEventListener('click',saveToken);
-  manualRow.appendChild(tokInp); manualRow.appendChild(tokSave);
-  manualBtn.addEventListener('click',()=>{ const shown=manualRow.style.display!=='none'; manualRow.style.display=shown?'none':'flex'; manualBtn.textContent=shown?'Type it':'Hide'; });
-  tokFileRow.appendChild(fileLabel); tokFileRow.appendChild(manualBtn);
-  tokSection.appendChild(tokFileRow); tokSection.appendChild(manualRow); bot.appendChild(tokSection);
   const syncRow=document.createElement('div'); syncRow.className='sb-sync-row';
   const loadBtn=document.createElement('button'); loadBtn.className='sb-sync-btn sb-sync-load'; loadBtn.innerHTML='Load';
   loadBtn.addEventListener('click',async()=>{ if(!appState.activeClientId){toast('Select a client first');return;} loadBtn.textContent='...'; loadBtn.disabled=true; const ok=await loadClientDataFromGH(appState.activeClientId,false); loadBtn.disabled=false; loadBtn.innerHTML='Load'; if(ok) render(); });
@@ -771,77 +775,56 @@ function buildClientsPage(){
         <button class="btn btn-outline btn-sm" onclick="editClient('${c.id}')">Edit</button>
         <button class="btn btn-primary btn-sm" onclick="switchClient('${c.id}')">Open &rarr;</button>
       </div>`;
+
+    // ── Per-client token section ──────────────────────────────
+    const tok=c.token?c.token.trim():'';
+    const tokDiv=document.createElement('div');
+    tokDiv.style.cssText='margin-top:14px;padding-top:12px;border-top:1px solid var(--border);';
+
+    // Status row
+    const tokStatus=document.createElement('div');
+    tokStatus.style.cssText='display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:6px;flex-wrap:wrap;';
+    const statusBadge=document.createElement('span');
+    statusBadge.style.cssText=`font-size:11px;font-weight:500;padding:2px 8px;border-radius:100px;background:${tok?'var(--teal-bg)':'var(--red-bg)'};color:${tok?'var(--teal-d)':'var(--red)'};`;
+    statusBadge.textContent=tok?'✓ Token saved (●●●● '+tok.slice(-4)+')':'⚠ No token';
+    tokStatus.appendChild(statusBadge);
+    if(tok){
+      const clrBtn=document.createElement('button'); clrBtn.className='btn btn-outline btn-sm';
+      clrBtn.style.cssText='font-size:10px;padding:2px 7px;color:var(--red);border-color:var(--red);';
+      clrBtn.textContent='Clear';
+      clrBtn.addEventListener('click',()=>{ if(confirm('Remove token for '+c.name+'?')){ setClientToken(c.id,''); toast('Token cleared'); render(); } });
+      tokStatus.appendChild(clrBtn);
+    }
+    tokDiv.appendChild(tokStatus);
+
+    // Attach file + paste row
+    const tokInputRow=document.createElement('div'); tokInputRow.style.cssText='display:flex;gap:6px;align-items:center;';
+
+    const flbl=document.createElement('label');
+    flbl.style.cssText='display:inline-flex;align-items:center;gap:5px;padding:5px 10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:11px;cursor:pointer;white-space:nowrap;transition:all .12s;';
+    flbl.innerHTML=`<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg> Attach .txt`;
+    const fi=document.createElement('input'); fi.type='file'; fi.accept='.txt,.token,text/*'; fi.style.display='none';
+    fi.addEventListener('change',()=>loadTokenFile(fi,c.id));
+    flbl.appendChild(fi);
+    tokInputRow.appendChild(flbl);
+
+    const pasteInp=document.createElement('input'); pasteInp.type='password'; pasteInp.className='form-input';
+    pasteInp.placeholder='Paste token: ghp_...'; pasteInp.style.cssText='flex:1;font-size:11px;padding:5px 8px;';
+    const saveBtn=document.createElement('button'); saveBtn.className='btn btn-primary btn-sm'; saveBtn.style.fontSize='11px'; saveBtn.textContent='Save';
+    saveBtn.addEventListener('click',()=>{ const v=pasteInp.value.trim(); if(!v){toast('Enter a token');return;} setClientToken(c.id,v); toast('\u2713 Token saved for '+c.name); render(); });
+    tokInputRow.appendChild(pasteInp); tokInputRow.appendChild(saveBtn);
+    tokDiv.appendChild(tokInputRow);
+
+    if(tok){
+      const dlBtn=document.createElement('button'); dlBtn.className='btn btn-outline btn-sm'; dlBtn.style.cssText='margin-top:6px;font-size:11px;width:100%;justify-content:center;';
+      dlBtn.innerHTML=`<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Download token.txt`;
+      dlBtn.addEventListener('click',()=>{ const b=new Blob([tok],{type:'text/plain'}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=c.name.replace(/\s+/g,'-').toLowerCase()+'-token.txt'; a.click(); toast('Token downloaded!'); });
+      tokDiv.appendChild(dlBtn);
+    }
+    card.appendChild(tokDiv);
     grid.appendChild(card);
   });
-  div.appendChild(grid);
-
-  // ── Quick Repo Links ───────────────────────────────────────────
-  const repoSec=document.createElement('div'); repoSec.style.cssText='margin-top:2rem;';
-  const repoHdr=document.createElement('div'); repoHdr.style.cssText='font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--muted);margin-bottom:10px;';
-  repoHdr.textContent='Quick Repo Links'; repoSec.appendChild(repoHdr);
-  const repoGrid=document.createElement('div'); repoGrid.style.cssText='display:flex;flex-wrap:wrap;gap:8px;';
-  appState.clients.forEach(c=>{
-    if(!c.repo) return;
-    const pill=document.createElement('a');
-    pill.href=`https://github.com/${GH_USER}/${c.repo}`;
-    pill.target='_blank';
-    pill.style.cssText='display:inline-flex;align-items:center;gap:5px;padding:5px 12px;background:var(--white);border:1px solid var(--border);border-radius:100px;font-size:12px;color:var(--text);text-decoration:none;transition:all .15s;';
-    pill.innerHTML=`<div class="client-dot c${c.color||0}" style="width:7px;height:7px;border-radius:50%;flex-shrink:0;"></div>${c.name.split(' ')[0]} <span style="color:var(--muted);font-size:11px">${GH_USER}/${c.repo}</span>`;
-    pill.addEventListener('mouseenter',()=>{pill.style.borderColor='var(--teal)';pill.style.color='var(--teal)';});
-    pill.addEventListener('mouseleave',()=>{pill.style.borderColor='var(--border)';pill.style.color='var(--text)';});
-    repoGrid.appendChild(pill);
-  });
-  // GitHub Pages links
-  appState.clients.forEach(c=>{
-    if(!c.repo) return;
-    const pill=document.createElement('a');
-    pill.href=`https://${GH_USER}.github.io/${c.repo}`;
-    pill.target='_blank';
-    pill.style.cssText='display:inline-flex;align-items:center;gap:5px;padding:5px 12px;background:var(--teal-bg);border:1px solid var(--teal-mid);border-radius:100px;font-size:12px;color:var(--teal-d);text-decoration:none;transition:all .15s;';
-    pill.innerHTML=`<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg> ${c.name.split(' ')[0]} Portal`;
-    repoGrid.appendChild(pill);
-  });
-  if(!appState.clients.length){ repoGrid.innerHTML=`<span style="font-size:12px;color:var(--hint)">Add a client to see repo links.</span>`; }
-  repoSec.appendChild(repoGrid);
-
-  // Token management panel
-  const tokSec=document.createElement('div'); tokSec.style.cssText='margin-top:1.75rem;background:var(--white);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;';
-  const tokTitle=document.createElement('div'); tokTitle.style.cssText='font-size:13px;font-weight:500;margin-bottom:4px;'; tokTitle.textContent='GitHub Token';
-  const tokDesc=document.createElement('div'); tokDesc.style.cssText='font-size:12px;color:var(--muted);margin-bottom:12px;'; tokDesc.textContent='Your token is stored in this browser. Attach a .txt file containing your token, or type it manually.';
-  tokSec.appendChild(tokTitle); tokSec.appendChild(tokDesc);
-  const tokStatus2=document.createElement('div'); tokStatus2.style.cssText='display:flex;align-items:center;gap:10px;flex-wrap:wrap;';
-  const statusBadge=document.createElement('span');
-  statusBadge.style.cssText=`display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:100px;font-size:12px;font-weight:500;background:${ghToken?'var(--teal-bg)':'var(--red-bg)'};color:${ghToken?'var(--teal-d)':'var(--red)'};`;
-  statusBadge.textContent=ghToken?'✓ Token saved (●●●● '+ghToken.slice(-4)+')':'⚠ No token saved';
-  tokStatus2.appendChild(statusBadge);
-  // Download token as file
-  if(ghToken){
-    const dlBtn=document.createElement('button'); dlBtn.className='btn btn-outline btn-sm';
-    dlBtn.innerHTML=`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Download token.txt`;
-    dlBtn.addEventListener('click',()=>{ const b=new Blob([ghToken],{type:'text/plain'}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download='github-token.txt'; a.click(); toast('Token downloaded!'); });
-    tokStatus2.appendChild(dlBtn);
-    const clearBtn=document.createElement('button'); clearBtn.className='btn btn-outline btn-sm'; clearBtn.style.color='var(--red)';
-    clearBtn.textContent='Clear token';
-    clearBtn.addEventListener('click',()=>{ if(confirm('Remove saved token?')){ ghToken=''; sessionStorage.removeItem('pv_gh_token'); localStorage.removeItem('pv_gh_token'); toast('Token cleared'); render(); } });
-    tokStatus2.appendChild(clearBtn);
-  }
-  tokSec.appendChild(tokStatus2);
-  // File attach + manual input
-  const tokInputRow=document.createElement('div'); tokInputRow.style.cssText='display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center;';
-  const flbl=document.createElement('label'); flbl.style.cssText='display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;cursor:pointer;transition:all .15s;';
-  flbl.innerHTML=`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg> Attach token.txt`;
-  const fi2=document.createElement('input'); fi2.type='file'; fi2.accept='.txt,.token,text/*'; fi2.style.display='none'; fi2.addEventListener('change',()=>loadTokenFile(fi2));
-  flbl.appendChild(fi2); tokInputRow.appendChild(flbl);
-  const manRow=document.createElement('div'); manRow.style.cssText='display:flex;gap:6px;flex:1;min-width:200px;';
-  const mInp=document.createElement('input'); mInp.type='password'; mInp.className='form-input'; mInp.placeholder='Or paste token: ghp_...'; mInp.value=''; mInp.style.fontSize='12px;';
-  const mSave=document.createElement('button'); mSave.className='btn btn-primary btn-sm'; mSave.textContent='Save';
-  mSave.addEventListener('click',()=>{ const v=mInp.value.trim(); if(!v){toast('Enter a token');return;} ghToken=v; sessionStorage.setItem('pv_gh_token',v); localStorage.setItem('pv_gh_token',v); toast('Token saved ✓'); render(); });
-  manRow.appendChild(mInp); manRow.appendChild(mSave); tokInputRow.appendChild(manRow);
-  tokSec.appendChild(tokInputRow);
-  repoSec.appendChild(tokSec);
-  div.appendChild(repoSec);
-
-  return div;
+  div.appendChild(grid); return div;
 }
 
 
@@ -1879,7 +1862,8 @@ function buildTimePicker(label, value, placeholder, onChange){
   return grp;
 }
 
-function buildEntryForm(m, modalData, isEdit){
+function buildEntryForm(m, modalData, isEdit, RATE){
+  RATE=RATE||activeClient()?.rate||0;
   // Date
   m.appendChild(fg('Date','date',modalData.date,'',v=>modalData.date=v));
   // Time row with auto-calc
@@ -1934,14 +1918,25 @@ function updateBreakdownPreview(entries, md, container){
 }
 
 function buildModal(){
+  const RATE=activeClient()?.rate||0;
   const ov=document.createElement('div'); ov.className='overlay';
   ov.addEventListener('click',e=>{ if(e.target===ov){ appState.modal=null; render(); }});
   const m=document.createElement('div'); m.className='modal';
   const foot=(saveLabel)=>{ const f=document.createElement('div'); f.className='modal-footer'; const c=document.createElement('button'); c.className='btn btn-outline'; c.textContent='Cancel'; c.addEventListener('click',()=>{ appState.modal=null; render(); }); const s=document.createElement('button'); s.className='btn btn-primary'; s.textContent=saveLabel||'Save'; s.addEventListener('click',()=>appState.modal.onSave()); f.appendChild(c); f.appendChild(s); return f; };
 
+  // ── Wizard modal ──────────────────────────────────────────────
+  if(appState.modal.type==='wizard'){
+    m.style.maxWidth='500px';
+    buildWizardModal(m); ov.appendChild(m); return ov;
+  }
+
+  // ── Edit client modal ─────────────────────────────────────────
+  if(appState.modal.type==='editClient'){
+    buildEditClientModal(m,appState.modal); ov.appendChild(m); return ov;
+  }
+
   // ── Day overview modal ────────────────────────────────────────
   if(appState.modal.type==='day'){
-    const RATE=activeClient()?.rate||0;
     const dateStr=appState.modal.date;
     const dt=new Date(dateStr+'T00:00:00');
     const dayEntries=activeData().entries.filter(e=>e.date===dateStr).sort((a,b)=>(a.timeIn||'').localeCompare(b.timeIn||''));
@@ -2023,14 +2018,14 @@ function buildModal(){
   // Edit existing entry
   if(appState.modal.type==='editEntry'){
     m.innerHTML=`<div class="modal-title">Edit Entry</div>`;
-    buildEntryForm(m, appState.modal.data, true);
+    buildEntryForm(m, appState.modal.data, true, RATE);
     m.appendChild(foot('Save changes'));
     ov.appendChild(m); return ov;
   }
 
   if(appState.modal.type==='entry'){
     m.innerHTML=`<div class="modal-title">Log time entry</div>`;
-    buildEntryForm(m, appState.modal.data, false);
+    buildEntryForm(m, appState.modal.data, false, RATE);
     m.appendChild(foot('Save entry'));
     ov.appendChild(m); return ov;
   }
@@ -2176,7 +2171,6 @@ function buildModal(){
   ov.appendChild(m); return ov;
 }
 
-// ── NEW CLIENT WIZARD ─────────────────────────────────────────────────────────
 let wizardStep=1; let wizardData={};
 function openNewClientWizard(){ wizardStep=1; wizardData={}; appState.modal={type:'wizard'}; render(); }
 window.openNewClientWizard=openNewClientWizard;
@@ -2247,26 +2241,6 @@ function buildEditClientModal(m,modal){
 }
 window.editClient=editClient;
 
-// ── WIRE UP MODAL WIZARD ──────────────────────────────────────────────────────
-// Patch buildModal to handle wizard and editClient types
-const _origBuildModal = buildModal;
-function buildModal(){
-  if(appState.modal && appState.modal.type==='wizard'){
-    const ov=document.createElement('div'); ov.className='overlay';
-    ov.addEventListener('click',e=>{if(e.target===ov){appState.modal=null;render();}});
-    const m=document.createElement('div'); m.className='modal'; m.style.maxWidth='500px';
-    buildWizardModal(m); ov.appendChild(m); return ov;
-  }
-  if(appState.modal && appState.modal.type==='editClient'){
-    const ov=document.createElement('div'); ov.className='overlay';
-    ov.addEventListener('click',e=>{if(e.target===ov){appState.modal=null;render();}});
-    const m=document.createElement('div'); m.className='modal';
-    buildEditClientModal(m,appState.modal); ov.appendChild(m); return ov;
-  }
-  return _origBuildModal();
-}
-
-
 // ── GLOBAL PH CLOCK (runs once, updates DOM by ID — no re-render) ────────────
 function _startGlobalClock(){
   if(window._phGlobalClockRunning) return; // already running
@@ -2284,10 +2258,9 @@ function _startGlobalClock(){
     const phAmpm = document.getElementById('ph-ampm');
     const phDate = document.getElementById('ph-date');
     if(phTime){
-      // Set only the text node (first child), not the ampm span
-      let tn = phTime.firstChild;
-      if(!tn || tn.nodeType !== 3){ tn = document.createTextNode(''); phTime.insertBefore(tn, phTime.firstChild); }
-      tn.textContent = timeStr;
+      let tn=phTime.firstChild;
+      if(!tn||tn.nodeType!==3){ tn=document.createTextNode(''); phTime.insertBefore(tn,phTime.firstChild); }
+      tn.textContent=timeStr;
     }
     if(phAmpm) phAmpm.textContent = ampm;
     if(phDate) phDate.textContent = dateStr;
