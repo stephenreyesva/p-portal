@@ -492,7 +492,8 @@ function ensureDefaultClient(){
 // ── GITHUB ───────────────────────────────────────────────────────────────────
 function ghHeaders(){ return {'Authorization':'Bearer '+ghToken,'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'}; }
 function hasToken(){ return !!ghToken.trim(); }
-function saveToken(){ const val=document.getElementById('gh-token-input')?.value?.trim(); if(!val){toast('Enter a token first');return;} ghToken=val; sessionStorage.setItem('pv_gh_token',val); localStorage.setItem('pv_gh_token',val); toast('Token saved \u2713'); }
+function saveToken(){ const val=document.getElementById('gh-token-input')?.value?.trim(); if(!val){toast('Enter a token first');return;} ghToken=val; sessionStorage.setItem('pv_gh_token',val); localStorage.setItem('pv_gh_token',val); toast('Token saved \u2713'); render(); }
+function loadTokenFile(input){ const file=input.files[0]; if(!file) return; const reader=new FileReader(); reader.onload=e=>{ const val=(e.target.result||'').trim(); if(!val){toast('Empty file');return;} ghToken=val; sessionStorage.setItem('pv_gh_token',val); localStorage.setItem('pv_gh_token',val); toast('\u2713 Token loaded from file!'); render(); }; reader.readAsText(file); }
 
 async function loadClientDataFromGH(clientId,silent){
   const c=appState.clients.find(cl=>cl.id===clientId); if(!c||!c.repo) return;
@@ -691,10 +692,29 @@ function buildSidebar(){
     sb.appendChild(cdet);
   }
   const bot=document.createElement('div'); bot.className='sidebar-bottom';
-  const tokRow=document.createElement('div'); tokRow.className='sb-token-row';
-  const tokInp=document.createElement('input'); tokInp.type='password'; tokInp.className='sb-token-input'; tokInp.id='gh-token-input'; tokInp.placeholder='GitHub Token'; tokInp.value=ghToken||'';
+  // Token section — file attach + status display (same as admin.html)
+  const tokSection=document.createElement('div'); tokSection.style.cssText='margin-bottom:8px;';
+  const tokStatus=document.createElement('div'); tokStatus.style.cssText='font-size:11px;color:var(--muted);margin-bottom:5px;display:flex;align-items:center;justify-content:space-between;';
+  const tokenMasked=ghToken?'●●●● '+ghToken.slice(-4):'No token saved';
+  const tokenColor=ghToken?'var(--teal)':'var(--red)';
+  tokStatus.innerHTML=`<span>GitHub Token: <span style="color:${tokenColor};font-weight:600">${tokenMasked}</span></span>`;
+  tokSection.appendChild(tokStatus);
+  // File attach button row
+  const tokFileRow=document.createElement('div'); tokFileRow.style.cssText='display:flex;gap:5px;align-items:center;margin-bottom:5px;';
+  const fileLabel=document.createElement('label'); fileLabel.style.cssText='flex:1;background:var(--bg);border:1px solid var(--border);color:var(--muted);border-radius:var(--radius-sm);padding:5px 8px;font-size:11px;cursor:pointer;text-align:center;transition:all .15s;display:flex;align-items:center;justify-content:center;gap:5px;';
+  fileLabel.innerHTML=`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg> Attach token.txt`;
+  const fileInput=document.createElement('input'); fileInput.type='file'; fileInput.accept='.txt,.token,text/*'; fileInput.style.display='none'; fileInput.id='gh-token-file';
+  fileInput.addEventListener('change',()=>loadTokenFile(fileInput));
+  fileLabel.appendChild(fileInput);
+  // Manual input toggle
+  const manualBtn=document.createElement('button'); manualBtn.className='sb-token-save'; manualBtn.style.cssText='font-size:10px;padding:5px 7px;white-space:nowrap;'; manualBtn.textContent='Type it';
+  const manualRow=document.createElement('div'); manualRow.style.cssText='display:none;gap:5px;margin-bottom:4px;'; manualRow.id='token-manual-row';
+  const tokInp=document.createElement('input'); tokInp.type='password'; tokInp.className='sb-token-input'; tokInp.id='gh-token-input'; tokInp.placeholder='ghp_... token'; tokInp.value=ghToken||'';
   const tokSave=document.createElement('button'); tokSave.className='sb-token-save'; tokSave.textContent='Save'; tokSave.addEventListener('click',saveToken);
-  tokRow.appendChild(tokInp); tokRow.appendChild(tokSave); bot.appendChild(tokRow);
+  manualRow.appendChild(tokInp); manualRow.appendChild(tokSave);
+  manualBtn.addEventListener('click',()=>{ const shown=manualRow.style.display!=='none'; manualRow.style.display=shown?'none':'flex'; manualBtn.textContent=shown?'Type it':'Hide'; });
+  tokFileRow.appendChild(fileLabel); tokFileRow.appendChild(manualBtn);
+  tokSection.appendChild(tokFileRow); tokSection.appendChild(manualRow); bot.appendChild(tokSection);
   const syncRow=document.createElement('div'); syncRow.className='sb-sync-row';
   const loadBtn=document.createElement('button'); loadBtn.className='sb-sync-btn sb-sync-load'; loadBtn.innerHTML='Load';
   loadBtn.addEventListener('click',async()=>{ if(!appState.activeClientId){toast('Select a client first');return;} loadBtn.textContent='...'; loadBtn.disabled=true; const ok=await loadClientDataFromGH(appState.activeClientId,false); loadBtn.disabled=false; loadBtn.innerHTML='Load'; if(ok) render(); });
@@ -753,7 +773,75 @@ function buildClientsPage(){
       </div>`;
     grid.appendChild(card);
   });
-  div.appendChild(grid); return div;
+  div.appendChild(grid);
+
+  // ── Quick Repo Links ───────────────────────────────────────────
+  const repoSec=document.createElement('div'); repoSec.style.cssText='margin-top:2rem;';
+  const repoHdr=document.createElement('div'); repoHdr.style.cssText='font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--muted);margin-bottom:10px;';
+  repoHdr.textContent='Quick Repo Links'; repoSec.appendChild(repoHdr);
+  const repoGrid=document.createElement('div'); repoGrid.style.cssText='display:flex;flex-wrap:wrap;gap:8px;';
+  appState.clients.forEach(c=>{
+    if(!c.repo) return;
+    const pill=document.createElement('a');
+    pill.href=`https://github.com/${GH_USER}/${c.repo}`;
+    pill.target='_blank';
+    pill.style.cssText='display:inline-flex;align-items:center;gap:5px;padding:5px 12px;background:var(--white);border:1px solid var(--border);border-radius:100px;font-size:12px;color:var(--text);text-decoration:none;transition:all .15s;';
+    pill.innerHTML=`<div class="client-dot c${c.color||0}" style="width:7px;height:7px;border-radius:50%;flex-shrink:0;"></div>${c.name.split(' ')[0]} <span style="color:var(--muted);font-size:11px">${GH_USER}/${c.repo}</span>`;
+    pill.addEventListener('mouseenter',()=>{pill.style.borderColor='var(--teal)';pill.style.color='var(--teal)';});
+    pill.addEventListener('mouseleave',()=>{pill.style.borderColor='var(--border)';pill.style.color='var(--text)';});
+    repoGrid.appendChild(pill);
+  });
+  // GitHub Pages links
+  appState.clients.forEach(c=>{
+    if(!c.repo) return;
+    const pill=document.createElement('a');
+    pill.href=`https://${GH_USER}.github.io/${c.repo}`;
+    pill.target='_blank';
+    pill.style.cssText='display:inline-flex;align-items:center;gap:5px;padding:5px 12px;background:var(--teal-bg);border:1px solid var(--teal-mid);border-radius:100px;font-size:12px;color:var(--teal-d);text-decoration:none;transition:all .15s;';
+    pill.innerHTML=`<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg> ${c.name.split(' ')[0]} Portal`;
+    repoGrid.appendChild(pill);
+  });
+  if(!appState.clients.length){ repoGrid.innerHTML=`<span style="font-size:12px;color:var(--hint)">Add a client to see repo links.</span>`; }
+  repoSec.appendChild(repoGrid);
+
+  // Token management panel
+  const tokSec=document.createElement('div'); tokSec.style.cssText='margin-top:1.75rem;background:var(--white);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;';
+  const tokTitle=document.createElement('div'); tokTitle.style.cssText='font-size:13px;font-weight:500;margin-bottom:4px;'; tokTitle.textContent='GitHub Token';
+  const tokDesc=document.createElement('div'); tokDesc.style.cssText='font-size:12px;color:var(--muted);margin-bottom:12px;'; tokDesc.textContent='Your token is stored in this browser. Attach a .txt file containing your token, or type it manually.';
+  tokSec.appendChild(tokTitle); tokSec.appendChild(tokDesc);
+  const tokStatus2=document.createElement('div'); tokStatus2.style.cssText='display:flex;align-items:center;gap:10px;flex-wrap:wrap;';
+  const statusBadge=document.createElement('span');
+  statusBadge.style.cssText=`display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:100px;font-size:12px;font-weight:500;background:${ghToken?'var(--teal-bg)':'var(--red-bg)'};color:${ghToken?'var(--teal-d)':'var(--red)'};`;
+  statusBadge.textContent=ghToken?'✓ Token saved (●●●● '+ghToken.slice(-4)+')':'⚠ No token saved';
+  tokStatus2.appendChild(statusBadge);
+  // Download token as file
+  if(ghToken){
+    const dlBtn=document.createElement('button'); dlBtn.className='btn btn-outline btn-sm';
+    dlBtn.innerHTML=`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Download token.txt`;
+    dlBtn.addEventListener('click',()=>{ const b=new Blob([ghToken],{type:'text/plain'}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download='github-token.txt'; a.click(); toast('Token downloaded!'); });
+    tokStatus2.appendChild(dlBtn);
+    const clearBtn=document.createElement('button'); clearBtn.className='btn btn-outline btn-sm'; clearBtn.style.color='var(--red)';
+    clearBtn.textContent='Clear token';
+    clearBtn.addEventListener('click',()=>{ if(confirm('Remove saved token?')){ ghToken=''; sessionStorage.removeItem('pv_gh_token'); localStorage.removeItem('pv_gh_token'); toast('Token cleared'); render(); } });
+    tokStatus2.appendChild(clearBtn);
+  }
+  tokSec.appendChild(tokStatus2);
+  // File attach + manual input
+  const tokInputRow=document.createElement('div'); tokInputRow.style.cssText='display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center;';
+  const flbl=document.createElement('label'); flbl.style.cssText='display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;cursor:pointer;transition:all .15s;';
+  flbl.innerHTML=`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg> Attach token.txt`;
+  const fi2=document.createElement('input'); fi2.type='file'; fi2.accept='.txt,.token,text/*'; fi2.style.display='none'; fi2.addEventListener('change',()=>loadTokenFile(fi2));
+  flbl.appendChild(fi2); tokInputRow.appendChild(flbl);
+  const manRow=document.createElement('div'); manRow.style.cssText='display:flex;gap:6px;flex:1;min-width:200px;';
+  const mInp=document.createElement('input'); mInp.type='password'; mInp.className='form-input'; mInp.placeholder='Or paste token: ghp_...'; mInp.value=''; mInp.style.fontSize='12px;';
+  const mSave=document.createElement('button'); mSave.className='btn btn-primary btn-sm'; mSave.textContent='Save';
+  mSave.addEventListener('click',()=>{ const v=mInp.value.trim(); if(!v){toast('Enter a token');return;} ghToken=v; sessionStorage.setItem('pv_gh_token',v); localStorage.setItem('pv_gh_token',v); toast('Token saved ✓'); render(); });
+  manRow.appendChild(mInp); manRow.appendChild(mSave); tokInputRow.appendChild(manRow);
+  tokSec.appendChild(tokInputRow);
+  repoSec.appendChild(tokSec);
+  div.appendChild(repoSec);
+
+  return div;
 }
 
 
@@ -983,7 +1071,7 @@ function buildDashboard(){
       const numBtn=document.createElement('button');
       numBtn.style.cssText='background:none;border:none;cursor:pointer;font-weight:500;color:var(--teal);font-family:inherit;font-size:13px;padding:0;text-decoration:underline;text-underline-offset:3px;';
       numBtn.textContent=inv.number;
-      numBtn.addEventListener('click',ev=>{ ev.stopPropagation(); appState.appState.invoiceDetailId=inv.id; appState.page='invoices'; render(); });
+      numBtn.addEventListener('click',ev=>{ ev.stopPropagation(); appState.invoiceDetailId=inv.id; appState.page='invoices'; render(); });
       const left=document.createElement('div'); left.style.cssText='display:flex;align-items:center;gap:6px;flex:1;min-width:0;';
       left.appendChild(numBtn);
       const pill=document.createElement('span'); pill.className='period-pill'; pill.textContent=inv.label||'—';
@@ -992,7 +1080,7 @@ function buildDashboard(){
       const gtPhp=fmtPhp(grandTotal);
       right.innerHTML=`<span class="badge badge-${inv.status||'draft'}">${STATUS_LABELS[inv.status||'draft']}</span><span style="font-weight:500">${fmt(grandTotal)}</span>${gtPhp?'<span style="font-size:11px;color:var(--muted)">≈ '+gtPhp+'</span>':''}`;
       r.appendChild(left); r.appendChild(right);
-      r.addEventListener('click',()=>{ appState.appState.invoiceDetailId=inv.id; appState.page='invoices'; render(); });
+      r.addEventListener('click',()=>{ appState.invoiceDetailId=inv.id; appState.page='invoices'; render(); });
       ib.appendChild(r);
     });
     ic.appendChild(ib); div.appendChild(ic);
@@ -1073,14 +1161,14 @@ function buildTimesheet(){
 
   // ── Calendar / view section ───────────────────────────────────
   const paidDates=getPaidDates();
-  if(appState.tsView==='calendar')    div.appendChild(buildTsCalendar(mEntries,monthH,paidDates));
-  else if(appState.tsView==='daily')  div.appendChild(buildTsDailyView(mEntries,paidDates));
-  else if(appState.tsView==='weekly') div.appendChild(buildTsWeeklyView(mEntries,monthH,paidDates));
-  else                        div.appendChild(buildTsMonthlyView(mEntries,monthH,paidDates));
+  if(appState.tsView==='calendar')    div.appendChild(buildTsCalendar(mEntries,monthH,paidDates,RATE));
+  else if(appState.tsView==='daily')  div.appendChild(buildTsDailyView(mEntries,paidDates,RATE));
+  else if(appState.tsView==='weekly') div.appendChild(buildTsWeeklyView(mEntries,monthH,paidDates,RATE));
+  else                        div.appendChild(buildTsMonthlyView(mEntries,monthH,paidDates,RATE));
 
   // ── Detailed Log table — latest first ────────────────────────
   if(mEntries.length){
-    div.appendChild(buildDetailedLog(mEntries,monthH,paidDates));
+    div.appendChild(buildDetailedLog(mEntries,monthH,paidDates,RATE));
   }
   return div;
 }
@@ -1359,7 +1447,7 @@ function buildInvoices(){
   if(appState.invoiceDetailId){
     const inv=activeData().invoices.find(i=>i.id===appState.invoiceDetailId);
     if(inv){ div.appendChild(buildInvoiceDetail(inv)); return div; }
-    appState.appState.invoiceDetailId=null;
+    appState.invoiceDetailId=null;
   }
 
   const hdr=document.createElement('div'); hdr.className='page-header';
@@ -1389,7 +1477,7 @@ function buildInvoices(){
       const numBtn=document.createElement('button');
       numBtn.style.cssText='background:none;border:none;cursor:pointer;font-weight:600;color:var(--teal);font-family:inherit;font-size:13px;padding:0;text-decoration:underline;text-underline-offset:3px;';
       numBtn.textContent=inv.number;
-      numBtn.addEventListener('click',()=>{ appState.appState.invoiceDetailId=inv.id; render(); });
+      numBtn.addEventListener('click',()=>{ appState.invoiceDetailId=inv.id; render(); });
       numTd.appendChild(numBtn);
 
       const isPaidInv = inv.status==='paid';
@@ -1453,7 +1541,7 @@ function buildInvoiceDetail(inv){
   const topBar=document.createElement('div'); topBar.className='page-header no-print';
   const backBtn=document.createElement('button'); backBtn.className='btn btn-outline';
   backBtn.innerHTML=`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg> Back to invoices`;
-  backBtn.addEventListener('click',()=>{ appState.appState.invoiceDetailId=null; render(); });
+  backBtn.addEventListener('click',()=>{ appState.invoiceDetailId=null; render(); });
   const rightBtns=document.createElement('div'); rightBtns.style.cssText='display:flex;gap:8px;align-items:center;';
   const printBtn=document.createElement('button'); printBtn.className='btn btn-outline';
   printBtn.innerHTML=`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg> Print / PDF`;
@@ -1853,6 +1941,7 @@ function buildModal(){
 
   // ── Day overview modal ────────────────────────────────────────
   if(appState.modal.type==='day'){
+    const RATE=activeClient()?.rate||0;
     const dateStr=appState.modal.date;
     const dt=new Date(dateStr+'T00:00:00');
     const dayEntries=activeData().entries.filter(e=>e.date===dateStr).sort((a,b)=>(a.timeIn||'').localeCompare(b.timeIn||''));
@@ -2194,7 +2283,12 @@ function _startGlobalClock(){
     const phTime = document.getElementById('ph-time');
     const phAmpm = document.getElementById('ph-ampm');
     const phDate = document.getElementById('ph-date');
-    if(phTime) phTime.childNodes[0].textContent = timeStr;
+    if(phTime){
+      // Set only the text node (first child), not the ampm span
+      let tn = phTime.firstChild;
+      if(!tn || tn.nodeType !== 3){ tn = document.createTextNode(''); phTime.insertBefore(tn, phTime.firstChild); }
+      tn.textContent = timeStr;
+    }
     if(phAmpm) phAmpm.textContent = ampm;
     if(phDate) phDate.textContent = dateStr;
     // Mobile clock strip
