@@ -609,8 +609,7 @@ function buildApp(){
   // Mobile clock strip
   const mobClk=document.createElement('div'); mobClk.className='mob-clock-strip no-print';
   mobClk.innerHTML=`<div class="t" id="mob-ph-time">--:--:-- --</div><div class="d" id="mob-ph-date">---</div>`;
-  function tickMobClock(){ const now=new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Manila'})); let h=now.getHours(),m=now.getMinutes(),s=now.getSeconds(); const ampm=h>=12?'PM':'AM'; h=h%12||12; const te=document.getElementById('mob-ph-time'); const de=document.getElementById('mob-ph-date'); if(te) te.textContent=`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')} ${ampm}`; if(de) de.textContent=now.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'}); }
-  tickMobClock(); if(window._mobClockTimer) clearInterval(window._mobClockTimer); window._mobClockTimer=setInterval(tickMobClock,1000);
+
   main.appendChild(mobClk);
   if(!ac||appState.page==='clients'){ main.appendChild(buildClientsPage()); }
   else if(appState.page==='dashboard'){ main.appendChild(buildDashboard()); }
@@ -657,8 +656,6 @@ function buildSidebar(){
   const clk=document.createElement('div'); clk.className='ph-clock no-print';
   clk.innerHTML=`<div class="ph-clock-time" id="ph-time">--:--<span class="ph-clock-ampm" id="ph-ampm">--</span></div><div class="ph-clock-date" id="ph-date">---</div><div class="ph-clock-label">Philippine Time (PHT)</div>`;
   sb.appendChild(clk);
-  function tickClock(){ const now=new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Manila'})); let h=now.getHours(),m=now.getMinutes(),s=now.getSeconds(); const ampm=h>=12?'PM':'AM'; h=h%12||12; const timeEl=document.getElementById('ph-time'); const dateEl=document.getElementById('ph-date'); if(timeEl){ timeEl.childNodes[0].textContent=`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`; document.getElementById('ph-ampm').textContent=ampm; } if(dateEl) dateEl.textContent=now.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'}); }
-  tickClock(); if(window._phClockTimer) clearInterval(window._phClockTimer); window._phClockTimer=setInterval(tickClock,1000);
   const ac=activeClient();
   if(!ac){
     const lbl=document.createElement('div'); lbl.className='sb-nav-label'; lbl.textContent='Clients'; sb.appendChild(lbl);
@@ -1089,7 +1086,7 @@ function buildTimesheet(){
 }
 
 // ── Calendar view ─────────────────────────────────────────────
-function buildTsCalendar(mEntries,monthH,paidDates){
+function buildTsCalendar(mEntries,monthH,paidDates,RATE){
   const calWrap=document.createElement('div'); calWrap.className='card'; calWrap.style.marginBottom='1.25rem';
   const calHdr=document.createElement('div'); calHdr.className='card-header';
   calHdr.innerHTML=`<div class="card-title">${MONTHS[appState.tsMonth]} ${appState.tsYear}</div><div style="font-size:12px;color:var(--muted)">${monthH.toFixed(1)}h &middot; ${fmt(monthH*RATE)}</div>`;
@@ -1155,7 +1152,7 @@ function buildTsCalendar(mEntries,monthH,paidDates){
 }
 
 // ── Daily view ────────────────────────────────────────────────
-function buildTsDailyView(mEntries,paidDates){
+function buildTsDailyView(mEntries,paidDates,RATE){
   const byDay={};
   mEntries.forEach(e=>{ if(!byDay[e.date])byDay[e.date]=[]; byDay[e.date].push(e); });
   const days=Object.keys(byDay).sort().reverse();
@@ -1165,14 +1162,14 @@ function buildTsDailyView(mEntries,paidDates){
   hdr.innerHTML=`<div class="card-title">${MONTHS[appState.tsMonth]} ${appState.tsYear} — Daily</div><div style="font-size:12px;color:var(--muted)">${mH.toFixed(1)}h &middot; ${fmt(mH*RATE)}</div>`;
   div.appendChild(hdr);
   if(!days.length){ div.innerHTML+=`<div class="empty"><div class="empty-icon">📅</div><p>No entries for this month.</p></div>`; return div; }
-  days.forEach(ds=>div.appendChild(buildAdminAccordion(ds, byDay[ds], paidDates)));
+  days.forEach(ds=>div.appendChild(buildAdminAccordion(ds, byDay[ds], paidDates, RATE)));
   const mt=document.createElement('div'); mt.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--teal-bg);border-top:2px solid var(--teal-mid);';
   mt.innerHTML=`<span style="font-size:11px;font-weight:600;color:var(--teal-d);text-transform:uppercase;letter-spacing:0.06em">Month Total</span><span style="font-weight:700;color:var(--teal-d)">${mH.toFixed(1)}h &nbsp;·&nbsp; ${fmt(mH*RATE)}</span>`;
   div.appendChild(mt); return div;
 }
 
 // ── Weekly view ───────────────────────────────────────────────
-function buildTsWeeklyView(mEntries,mH,paidDates){
+function buildTsWeeklyView(mEntries,mH,paidDates,RATE){
   const weeks={};
   mEntries.forEach(e=>{
     const d=new Date(e.date+'T00:00:00'); const ws=new Date(d); ws.setDate(d.getDate()-d.getDay());
@@ -1192,7 +1189,7 @@ function buildTsWeeklyView(mEntries,mH,paidDates){
     grp.innerHTML=`<span>${wLabel}</span><span style="font-size:11px;font-weight:600;color:var(--teal);text-transform:none;letter-spacing:0">${wkH.toFixed(1)}h &middot; ${fmt(wkH*RATE)}</span>`;
     div.appendChild(grp);
     const byDay={}; entries.forEach(e=>{ if(!byDay[e.date])byDay[e.date]=[]; byDay[e.date].push(e); });
-    Object.keys(byDay).sort().forEach(ds=>div.appendChild(buildAdminAccordion(ds, byDay[ds], paidDates)));
+    Object.keys(byDay).sort().forEach(ds=>div.appendChild(buildAdminAccordion(ds, byDay[ds], paidDates, RATE)));
   });
   const mt=document.createElement('div'); mt.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--teal-bg);border-top:2px solid var(--teal-mid);';
   mt.innerHTML=`<span style="font-size:11px;font-weight:600;color:var(--teal-d);text-transform:uppercase;letter-spacing:0.06em">Month Total</span><span style="font-weight:700;color:var(--teal-d)">${mH.toFixed(1)}h &nbsp;·&nbsp; ${fmt(mH*RATE)}</span>`;
@@ -1200,7 +1197,7 @@ function buildTsWeeklyView(mEntries,mH,paidDates){
 }
 
 // ── Monthly view ──────────────────────────────────────────────
-function buildTsMonthlyView(mEntries,mH,paidDates){
+function buildTsMonthlyView(mEntries,mH,paidDates,RATE){
   const byDay={};
   mEntries.forEach(e=>{ if(!byDay[e.date])byDay[e.date]=[]; byDay[e.date].push(e); });
   const div=document.createElement('div'); div.className='card'; div.style.marginBottom='1.25rem';
@@ -1208,14 +1205,14 @@ function buildTsMonthlyView(mEntries,mH,paidDates){
   hdr.innerHTML=`<div class="card-title">${MONTHS[appState.tsMonth]} ${appState.tsYear} — All Entries</div><div style="font-size:12px;color:var(--muted)">${mH.toFixed(1)}h &middot; ${fmt(mH*RATE)}</div>`;
   div.appendChild(hdr);
   if(!Object.keys(byDay).length){ div.innerHTML+=`<div class="empty"><div class="empty-icon">📅</div><p>No entries for this month.</p></div>`; return div; }
-  Object.keys(byDay).sort().forEach(ds=>div.appendChild(buildAdminAccordion(ds, byDay[ds], paidDates)));
+  Object.keys(byDay).sort().forEach(ds=>div.appendChild(buildAdminAccordion(ds, byDay[ds], paidDates, RATE)));
   const mt=document.createElement('div'); mt.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--teal-bg);border-top:2px solid var(--teal-mid);';
   mt.innerHTML=`<span style="font-size:11px;font-weight:600;color:var(--teal-d);text-transform:uppercase;letter-spacing:0.06em">Month Total</span><span style="font-weight:700;color:var(--teal-d)">${mH.toFixed(1)}h &nbsp;·&nbsp; ${fmt(mH*RATE)}</span>`;
   div.appendChild(mt); return div;
 }
 
 // ── Accordion group (admin — shows hours + amount) ────────────
-function buildAdminAccordion(dateStr, entries, paidDates){
+function buildAdminAccordion(dateStr, entries, paidDates, RATE){
   const dH=totalHours(entries);
   const isPaidDay=paidDates.has(dateStr);
   const isOpen=appState.openAccordions.has(dateStr);
@@ -1253,7 +1250,7 @@ function buildAdminAccordion(dateStr, entries, paidDates){
 }
 
 // ── Detailed Log table (latest first, paid = Edit only) ───────
-function buildDetailedLog(mEntries,monthH,paidDates){
+function buildDetailedLog(mEntries,monthH,paidDates,RATE){
   const sorted=[...mEntries].sort((a,b)=>b.date.localeCompare(a.date)); // latest first
   const card=document.createElement('div'); card.className='card'; card.style.marginTop='1.25rem';
   const tblHdr=document.createElement('div'); tblHdr.className='card-header';
@@ -2180,8 +2177,39 @@ function buildModal(){
   return _origBuildModal();
 }
 
+
+// ── GLOBAL PH CLOCK (runs once, updates DOM by ID — no re-render) ────────────
+function _startGlobalClock(){
+  if(window._phGlobalClockRunning) return; // already running
+  window._phGlobalClockRunning = true;
+  function tick(){
+    const now = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Manila'}));
+    let h=now.getHours(), m=now.getMinutes(), s=now.getSeconds();
+    const ampm = h>=12?'PM':'AM';
+    h = h%12||12;
+    const hh=String(h).padStart(2,'0'), mm=String(m).padStart(2,'0'), ss=String(s).padStart(2,'0');
+    const dateStr = now.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'});
+    const timeStr = `${hh}:${mm}:${ss}`;
+    // Sidebar clock
+    const phTime = document.getElementById('ph-time');
+    const phAmpm = document.getElementById('ph-ampm');
+    const phDate = document.getElementById('ph-date');
+    if(phTime) phTime.childNodes[0].textContent = timeStr;
+    if(phAmpm) phAmpm.textContent = ampm;
+    if(phDate) phDate.textContent = dateStr;
+    // Mobile clock strip
+    const mobTime = document.getElementById('mob-ph-time');
+    const mobDate = document.getElementById('mob-ph-date');
+    if(mobTime) mobTime.textContent = `${hh}:${mm}:${ss} ${ampm}`;
+    if(mobDate) mobDate.textContent = dateStr;
+  }
+  tick();
+  setInterval(tick, 1000);
+}
+
 // ── INIT ──────────────────────────────────────────────────────────────────────
 ghToken = sessionStorage.getItem('pv_gh_token')||localStorage.getItem('pv_gh_token')||'';
+_startGlobalClock();
 
 if(sessionStorage.getItem('sr_auth')==='1'){
   appState.loggedIn=true;
