@@ -719,16 +719,6 @@ function buildSidebar(){
     sb.appendChild(cdet);
   }
   const bot=document.createElement('div'); bot.className='sidebar-bottom';
-  const syncRow=document.createElement('div'); syncRow.className='sb-sync-row';
-  const loadBtn=document.createElement('button'); loadBtn.className='sb-sync-btn sb-sync-load'; loadBtn.innerHTML='Load';
-  loadBtn.addEventListener('click',async()=>{ if(!appState.activeClientId){toast('Select a client first');return;} loadBtn.textContent='...'; loadBtn.disabled=true; const ok=await loadClientDataFromGH(appState.activeClientId,false); loadBtn.disabled=false; loadBtn.innerHTML='Load'; if(ok) render(); });
-  const pubBtn=document.createElement('button'); pubBtn.className='sb-sync-btn sb-sync-pub'; pubBtn.innerHTML='Publish';
-  pubBtn.addEventListener('click',async()=>{ if(!appState.activeClientId){toast('Select a client first');return;} pubBtn.textContent='...'; pubBtn.disabled=true; await publishClientDataToGH(appState.activeClientId); pubBtn.disabled=false; pubBtn.innerHTML='Publish'; render(); });
-  const dlBtn=document.createElement('button'); dlBtn.className='sb-sync-btn sb-sync-dl'; dlBtn.title='Download backup'; dlBtn.textContent='DL';
-  dlBtn.addEventListener('click',downloadBackup);
-  syncRow.appendChild(loadBtn); syncRow.appendChild(pubBtn); syncRow.appendChild(dlBtn); bot.appendChild(syncRow);
-  const lastSync=appState.activeClientId?localStorage.getItem('sr_last_sync_'+appState.activeClientId):null;
-  const syncSt=document.createElement('div'); syncSt.className='sb-sync-status'; syncSt.textContent=lastSync?'Published: '+new Date(parseInt(lastSync)).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}):'Last sync: never'; bot.appendChild(syncSt);
   const logoutBtn=document.createElement('button'); logoutBtn.className='nav-item'; logoutBtn.style.cssText='margin-top:6px;color:var(--red);';
   logoutBtn.innerHTML=`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>Sign out`;
   logoutBtn.addEventListener('click',logout); bot.appendChild(logoutBtn);
@@ -871,7 +861,24 @@ function buildDashboard(){
   ms.appendChild(mSel); ms.appendChild(ySel); hdr.appendChild(ms);
   div.appendChild(hdr);
 
-  // ── Data ─────────────────────────────────────────────────────
+  // ── Sync bar ─────────────────────────────────────────────────
+  const syncBar=document.createElement('div'); syncBar.className='sync-bar no-print';
+  syncBar.style.cssText='display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--white);border:1px solid var(--border);border-radius:var(--radius);padding:10px 16px;margin-bottom:1.25rem;';
+  const lastSync=localStorage.getItem('sr_last_sync_'+appState.activeClientId);
+  const syncLabel=document.createElement('span'); syncLabel.style.cssText='font-size:12px;color:var(--muted);flex:1;';
+  syncLabel.textContent=lastSync?'Last published: '+new Date(parseInt(lastSync)).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',month:'short',day:'numeric'}):'Not yet published';
+  syncBar.appendChild(syncLabel);
+  const lBtn=document.createElement('button'); lBtn.className='btn btn-outline btn-sm';
+  lBtn.innerHTML=`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg> Load`;
+  lBtn.addEventListener('click',async()=>{ lBtn.disabled=true; lBtn.textContent='Loading...'; const ok=await loadClientDataFromGH(appState.activeClientId,false); lBtn.disabled=false; lBtn.innerHTML=`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg> Load`; if(ok) render(); });
+  const pBtn=document.createElement('button'); pBtn.className='btn btn-primary btn-sm';
+  pBtn.innerHTML=`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg> Publish`;
+  pBtn.addEventListener('click',async()=>{ pBtn.disabled=true; pBtn.textContent='Publishing...'; await publishClientDataToGH(appState.activeClientId); pBtn.disabled=false; pBtn.innerHTML=`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg> Publish`; render(); });
+  const dlBtn2=document.createElement('button'); dlBtn2.className='btn btn-outline btn-sm';
+  dlBtn2.innerHTML=`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Backup`;
+  dlBtn2.addEventListener('click',downloadBackup);
+  syncBar.appendChild(lBtn); syncBar.appendChild(pBtn); syncBar.appendChild(dlBtn2);
+  div.appendChild(syncBar);
   const period=getAdminBiMonthlyPeriod(appState.dashMonth,appState.dashYear);
   const periodEntries=getPeriodEntries(period.start,period.end);
   const mEntries=getMonthEntries(appState.dashMonth,appState.dashYear);
