@@ -904,7 +904,7 @@ function buildApp(){
     const btn=document.createElement('button'); btn.className='th-currency-btn'+(appState.budgetCurrency===code?' active':'');
     btn.textContent=cur.flag+' '+code;
     btn.title=cur.name;
-    btn.addEventListener('click',()=>{ appState.budgetCurrency=code; render(); });
+    btn.addEventListener('click',()=>{ appState.budgetCurrency=code; saveLocal(); render(); });
     curWrap.appendChild(btn);
   });
   topRight.appendChild(curWrap);
@@ -4575,6 +4575,13 @@ function openMBModal(type,item,overrideBm,overrideBy){
 function buildMBItemModal(m){
   const d = appState.modal.data;
   if(!d) return;
+  // Build expense presets dynamically — replace Bank1/2/3 with actual bank names
+  const dynBankPresets=(appState.banks||[]).map(b=>b.name);
+  const BASE_PRESETS=['Car','Sewa','House Rent','PH Allowance','Groceries','Utilities','Phone','Internet','Insurance','Entertainment','Other'];
+  MB_EXPENSE_PRESETS.length=0;
+  dynBankPresets.forEach(n=>MB_EXPENSE_PRESETS.push(n));
+  BASE_PRESETS.forEach(n=>{ if(!MB_EXPENSE_PRESETS.includes(n)) MB_EXPENSE_PRESETS.push(n); });
+  if(!MB_EXPENSE_PRESETS.length) ['Bank 1','Bank 2','Bank 3',...BASE_PRESETS].forEach(n=>MB_EXPENSE_PRESETS.push(n));
 
   // ── Migrate old flat categories saved in existing records ─────────────────
   const OLD_TO_CAT   = {'Salary':'Freelance Income','Bonus':'Freelance Income','Freelance':'Freelance Income'};
@@ -4609,6 +4616,18 @@ function buildMBItemModal(m){
       } else { d.category=e.target.value; d.label=e.target.value; buildMBItemModal(m); }
     });
     labG.appendChild(labSel); m.appendChild(labG);
+    // If selected category matches a CC bank, show coverage dates
+    const selBank2=(appState.banks||[]).find(b=>b.name===d.category&&b.type==='Credit Card');
+    if(selBank2){
+      const ccTip=document.createElement('div'); ccTip.style.cssText='font-size:11px;color:var(--blue);background:var(--blue-bg);padding:6px 10px;border-radius:var(--radius-sm);margin-bottom:8px;';
+      ccTip.innerHTML=`💳 Credit Card payment — <strong>${selBank2.name}</strong>. Set statement coverage dates below.`;
+      m.appendChild(ccTip);
+      const cvRow=document.createElement('div'); cvRow.className='form-row';
+      cvRow.appendChild(fg('Coverage From (date)','date',d.coverageFrom||'','',v=>d.coverageFrom=v));
+      cvRow.appendChild(fg('Coverage To (date)','date',d.coverageTo||selBank2.cutoffDay?'':'',v=>d.coverageTo=v));
+      m.appendChild(cvRow);
+      if(!d.notes) d.notes=`${selBank2.name} CC Statement${d.coverageFrom?` (${d.coverageFrom} – ${d.coverageTo||''})`:''} `;
+    }
 
   // ── INCOME: hierarchical category ─────────────────────────────────────────
   } else {
@@ -4748,9 +4767,41 @@ function buildMBItemModal(m){
     const btn=document.createElement('button'); btn.type='button';
     btn.className='btn btn-sm'+((d.currency||'AED')===c?' btn-primary':' btn-outline');
     btn.textContent=flag+' '+c;
-    btn.addEventListener('click',()=>{ d.currency=c; buildMBItemModal(m); });
+    btn.addEventListener('click',()=>{
+      d.currency=c;
+      // Auto-set destination bank hint in notes
+      if(!isExpense){
+        if(c==='USD'){
+          // Find PayPal bank
+          const pp=(appState.banks||[]).find(b=>b.name.toLowerCase().includes('paypal'));
+          if(pp&&!d.notes) d.notes='Credited to '+pp.name;
+          else if(!pp&&!d.notes) d.notes='Credited to PayPal';
+          d.destinationBank='paypal';
+        } else if(c==='AED'){
+          // Find ENBD Savings
+          const enbd=(appState.banks||[]).find(b=>b.name.toLowerCase().includes('enbd')&&b.type==='Savings');
+          if(enbd&&!d.notes) d.notes='Credited to '+enbd.name+(enbd.accountNo?' ●'+enbd.accountNo.slice(-4):'');
+          else if(!enbd&&!d.notes) d.notes='Credited to ENBD Savings';
+          d.destinationBank=enbd?enbd.id:'enbd';
+        }
+      }
+      buildMBItemModal(m);
+    });
     curRow.appendChild(btn);
   });
+  // Show destination bank hint
+  if(!isExpense&&d.currency){
+    const destNote=document.createElement('div'); destNote.style.cssText='font-size:11px;color:var(--blue);padding:5px 10px;background:var(--blue-bg);border-radius:4px;margin-top:6px;display:flex;align-items:center;gap:5px;';
+    if(d.currency==='USD'){
+      const pp=(appState.banks||[]).find(b=>b.name.toLowerCase().includes('paypal'));
+      destNote.innerHTML=`<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg> USD income → <strong style="margin-left:3px">${pp?pp.name:'PayPal'}</strong>`;
+      curRow.parentElement?.appendChild(destNote);
+    } else if(d.currency==='AED'){
+      const enbd=(appState.banks||[]).find(b=>b.name.toLowerCase().includes('enbd')&&b.type==='Savings');
+      destNote.innerHTML=`<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg> AED income → <strong style="margin-left:3px">${enbd?enbd.name+' ●'+(enbd.accountNo||'').slice(-4):'ENBD Savings'}</strong>`;
+      curRow.parentElement?.appendChild(destNote);
+    }
+  }
   curG.appendChild(curRow); m.appendChild(curG);
 
   // ── Amount ────────────────────────────────────────────────────────────────
@@ -4922,7 +4973,12 @@ function buildTapModal(m){
   const bkSel=document.createElement('select'); bkSel.className='form-select';
   if(!appState.banks||!appState.banks.length){ bkSel.innerHTML='<option value="">No banks set up</option>'; }
   else { appState.banks.forEach(b=>{ const o=document.createElement('option'); o.value=b.id; o.textContent=b.name; if(b.id===d.bankId)o.selected=true; bkSel.appendChild(o); }); }
-  bkSel.addEventListener('change',e=>{ d.bankId=e.target.value; buildTapModal(m); }); bkG.appendChild(bkSel);
+  bkSel.addEventListener('change',e=>{
+    d.bankId=e.target.value;
+    // Reset PH-specific fields when bank changes
+    d.tapPurpose=''; d.tapMemberId='';
+    buildTapModal(m);
+  }); bkG.appendChild(bkSel);
   // Show balance preview for selected bank
   if(d.bankId){
     const selBank=(appState.banks||[]).find(b=>b.id===d.bankId);
@@ -4936,6 +4992,45 @@ function buildTapModal(m){
     }
   }
   m.appendChild(bkG);
+  // ── PH Bank special flow (GCash / Maya / UB) ────────────────────────────
+  const selBankObj=(appState.banks||[]).find(b=>b.id===d.bankId);
+  const isPHBank=selBankObj&&(selBankObj.currency==='PHP'||['gcash','maya','ub'].some(k=>selBankObj.name.toLowerCase().includes(k)));
+  if(isPHBank){
+    const phPurpG=document.createElement('div'); phPurpG.className='form-group'; phPurpG.innerHTML='<label class="form-label">Purpose</label>';
+    const phPurpRow=document.createElement('div'); phPurpRow.style.cssText='display:flex;gap:8px;flex-wrap:wrap;';
+    [['allowance','👨‍👩‍👧 Allowance'],['investment','📈 Investment'],['others','📌 Others']].forEach(([val,label])=>{
+      const btn=document.createElement('button'); btn.type='button';
+      btn.className='btn btn-sm'+((d.tapPurpose||'')===val?' btn-primary':' btn-outline');
+      btn.textContent=label;
+      btn.addEventListener('click',()=>{ d.tapPurpose=val; if(val!=='allowance') d.tapMemberId=''; buildTapModal(m); });
+      phPurpRow.appendChild(btn);
+    });
+    phPurpG.appendChild(phPurpRow); m.appendChild(phPurpG);
+    // If allowance — pick family member to auto-mark as sent
+    if(d.tapPurpose==='allowance'){
+      const members=appState.familyMembers||[];
+      if(members.length){
+        const memG=document.createElement('div'); memG.className='form-group'; memG.innerHTML='<label class="form-label">For which member? <span style="color:var(--hint);font-size:11px;">(marks their status as Sent)</span></label>';
+        const memSel=document.createElement('select'); memSel.className='form-select';
+        const blankM=document.createElement('option'); blankM.value=''; blankM.textContent='— Select member —'; memSel.appendChild(blankM);
+        members.forEach(fm=>{
+          const o=document.createElement('option'); o.value=fm.id; o.textContent=fm.icon+' '+fm.label;
+          if(fm.id===d.tapMemberId) o.selected=true; memSel.appendChild(o);
+        });
+        memSel.addEventListener('change',e=>{ d.tapMemberId=e.target.value; });
+        memG.appendChild(memSel); m.appendChild(memG);
+        if(d.tapMemberId){
+          const memHint=document.createElement('div'); memHint.style.cssText='font-size:11px;color:var(--teal-d);padding:5px 10px;background:var(--teal-bg);border-radius:4px;margin-top:-4px;margin-bottom:8px;';
+          const selMem=members.find(f=>f.id===d.tapMemberId);
+          memHint.textContent=`✓ Saving will mark ${selMem?.label||''}'s allowance as Sent in Monthly Budget`;
+          m.appendChild(memHint);
+        }
+      } else {
+        const noMem=document.createElement('div'); noMem.style.cssText='font-size:11px;color:var(--hint);padding:5px 0;';
+        noMem.textContent='No family members set up. Add them in the Budget Tracker sidebar.'; m.appendChild(noMem);
+      }
+    }
+  }
   m.appendChild(fg('Date','date',d.date,'',v=>d.date=v));
   m.appendChild(fg('Description *','text',d.description||'','e.g. Groceries',v=>d.description=v));
   // Type
@@ -4958,6 +5053,18 @@ function buildTapModal(m){
     if(!d.amount){toast('Enter an amount');return;}
     const idx=(appState.dailyTap||[]).findIndex(t=>t.id===d.id);
     if(idx>-1) appState.dailyTap[idx]={...d}; else { if(!appState.dailyTap) appState.dailyTap=[]; appState.dailyTap.push({...d}); }
+    // Auto-mark member allowance as sent in Monthly Budget
+    if(d.tapPurpose==='allowance'&&d.tapMemberId){
+      const fm=(appState.familyMembers||[]).find(f=>f.id===d.tapMemberId);
+      if(fm){
+        (appState.monthlyBudget||[]).forEach(mb=>{
+          if(mb.isPHAllowance&&mb.label&&mb.label.toLowerCase().includes(fm.label.toLowerCase())){
+            mb.sent=true;
+          }
+        });
+        toast(`✓ ${fm.label}'s allowance marked as Sent`);
+      }
+    }
     saveLocal(); appState.modal=null; toast(isEdit?'Tap updated!':'Tap added!'); render();
   });
   if(isEdit){ const del=document.createElement('button'); del.className='btn btn-danger'; del.textContent='Delete'; del.addEventListener('click',()=>{ appState.dailyTap=appState.dailyTap.filter(t=>t.id!==d.id); saveLocal(); appState.modal=null; toast('Deleted'); render(); }); foot.appendChild(del); }
