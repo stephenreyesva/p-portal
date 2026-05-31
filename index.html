@@ -3356,7 +3356,22 @@ function buildDashIncomeModal(m){
   ['AED','PHP','USD'].forEach(c=>{ const btn=document.createElement('button'); btn.className='btn btn-sm'+(d.currency===c?' btn-primary':' btn-outline'); btn.textContent=c==='AED'?'🇦🇪 AED':c==='PHP'?'🇵🇭 PHP':'🇺🇸 USD'; btn.addEventListener('click',()=>{ d.currency=c; buildDashIncomeModal(m); }); cr.appendChild(btn); });
   cg.appendChild(cr); m.appendChild(cg);
   const dispAmt=d.amount?(Math.round(parseFloat(d.amount)*100)/100).toFixed(2):'';
-  m.appendChild(fg('Amount','number',dispAmt,'0.00',v=>d.amount=Math.round(parseFloat(v)*100)/100||0));
+  const amtGrpEl=fg('Amount','number',dispAmt,'0.00',v=>{ d.amount=Math.round(parseFloat(v)*100)/100||0; buildTapModal(m); });
+  m.appendChild(amtGrpEl);
+  // Balance impact preview
+  if(d.bankId&&d.amount){
+    const selBank2=(appState.banks||[]).find(b=>b.id===d.bankId);
+    if(selBank2){
+      const isCC2=selBank2.type==='Credit Card';
+      const curBal=getBankBalance(selBank2);
+      const tapAmt=parseFloat(d.amount)||0;
+      const newBal=d.tapType==='out'?curBal-tapAmt:curBal+tapAmt;
+      const sym2=selBank2.currency==='PHP'?'₱':'AED ';
+      const impEl=document.createElement('div'); impEl.style.cssText='font-size:12px;padding:8px 12px;border-radius:var(--radius-sm);margin-bottom:4px;background:'+(newBal<0?'var(--red-bg)':'var(--teal-bg)')+';';
+      impEl.innerHTML=`After this tap: <strong style="color:${newBal<0?'var(--red)':'var(--teal-d)'};">${sym2}${newBal.toLocaleString('en-US',{minimumFractionDigits:2})}</strong> ${isCC2?'available':'balance'} ${newBal<0?'⚠ Over limit':''}`;
+      m.appendChild(impEl);
+    }
+  }
   if(d.currency==='AED'&&d.amount){ const prev=document.createElement('div'); prev.style.cssText='font-size:12px;color:var(--teal-d);margin:-6px 0 10px;padding:5px 10px;background:var(--teal-bg);border-radius:4px;'; prev.textContent='≈ ₱'+(parseFloat(d.amount||0)*getEnbdRate()).toLocaleString('en-US',{minimumFractionDigits:2})+' (ENBD rate)'; m.appendChild(prev); }
   // Status
   const sg=document.createElement('div'); sg.className='form-group'; sg.innerHTML='<label class="form-label">Status</label>';
@@ -4043,7 +4058,11 @@ function generateDebtCtrlNo(){
 }
 function openDebtModal(item){
   appState.modal={type:'manual_debt', data: item ? {...item} : {
-    id:'md_'+Date.now(), ctrlNo:generateDebtCtrlNo(), person:'', description:'', totalAmount:'', paidAmount:0, currency:'AED', status:'active', notes:'', createdAt:new Date().toISOString().slice(0,10)
+    id:'md_'+Date.now(), ctrlNo:generateDebtCtrlNo(),
+    creditorType:'person', // 'person' | 'bank'
+    bankId:'', person:'', description:'',
+    totalAmount:'', paidAmount:0, currency:'AED',
+    status:'active', notes:'', createdAt:new Date().toISOString().slice(0,10)
   }}; render();
 }
 function buildManualDebtModal(m){
@@ -4054,7 +4073,64 @@ function buildManualDebtModal(m){
   const ctrlRow=document.createElement('div'); ctrlRow.style.cssText='display:flex;align-items:center;gap:10px;margin-bottom:14px;padding:8px 12px;background:var(--bg);border-radius:var(--radius-sm);border:1px solid var(--border);';
   ctrlRow.innerHTML=`<span style="font-size:11px;color:var(--muted)">Control No.</span><span style="font-size:15px;font-weight:700;color:var(--teal);letter-spacing:0.06em;font-family:monospace;">${d.ctrlNo}</span><span style="font-size:10px;color:var(--hint);margin-left:auto">Auto-generated · unique per debt</span>`;
   m.appendChild(ctrlRow);
-  m.appendChild(fg('Person / Creditor *','text',d.person||'','e.g. BPI, John, etc.',v=>d.person=v));
+  // ── Creditor type: Bank or Person ───────────────────────────────
+  const ctG=document.createElement('div'); ctG.className='form-group'; ctG.innerHTML='<label class="form-label">Creditor Type</label>';
+  const ctRow=document.createElement('div'); ctRow.style.cssText='display:flex;gap:8px;margin-top:4px;';
+  [{val:'person',icon:'👤',label:'Person'},{val:'bank',icon:'🏦',label:'Bank / Card'}].forEach(({val,icon,label})=>{
+    const isA=( d.creditorType||'person')===val;
+    const btn=document.createElement('button'); btn.type='button';
+    btn.style.cssText=`padding:9px 16px;border-radius:var(--radius-sm);border:2px solid ${isA?'var(--teal)':'var(--border)'};background:${isA?'var(--teal-bg)':'var(--white)'};cursor:pointer;font-family:inherit;font-size:13px;font-weight:${isA?'600':'400'};color:${isA?'var(--teal)':'var(--muted)'};transition:all .12s;`;
+    btn.textContent=icon+' '+label;
+    btn.addEventListener('click',()=>{ d.creditorType=val; d.bankId=''; d.person=''; buildManualDebtModal(m); });
+    ctRow.appendChild(btn);
+  });
+  ctG.appendChild(ctRow); m.appendChild(ctG);
+
+  // ── Bank selector (if Bank type) ─────────────────────────────
+  if((d.creditorType||'person')==='bank'){
+    const ccBanks=(appState.banks||[]).filter(b=>b.type==='Credit Card');
+    const allBanks=(appState.banks||[]);
+    const debtBanks=allBanks.length?allBanks:[];
+    if(!debtBanks.length){
+      const nb=document.createElement('div'); nb.style.cssText='font-size:12px;color:var(--hint);padding:8px 0;';
+      nb.textContent='No banks set up yet. Add a bank first.'; m.appendChild(nb);
+    } else {
+      const bkG=document.createElement('div'); bkG.className='form-group'; bkG.innerHTML='<label class="form-label">Select Bank / Card *</label>';
+      debtBanks.forEach(bank=>{
+        const isCC=bank.type==='Credit Card';
+        const avail=getBankBalance(bank);
+        const isSelected=d.bankId===bank.id;
+        const bCard=document.createElement('div');
+        bCard.style.cssText=`border:2px solid ${isSelected?'var(--teal)':'var(--border)'};border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:6px;cursor:pointer;background:${isSelected?'var(--teal-bg)':'var(--white)'};display:flex;align-items:center;gap:10px;transition:all .12s;`;
+        const dot=document.createElement('div'); dot.style.cssText=`width:12px;height:12px;border-radius:50%;background:${bank.color||'var(--teal)'};flex-shrink:0;`;
+        const bInfo=document.createElement('div'); bInfo.style.flex='1';
+        const sym=bank.currency==='PHP'?'₱':'AED ';
+        bInfo.innerHTML=`<div style="font-weight:600;font-size:13px;color:${isSelected?'var(--teal)':'var(--text)'};">${bank.name}${bank.accountNo?' ●'+bank.accountNo.slice(-4):''}</div><div style="font-size:11px;color:var(--muted);">${bank.type} · ${sym}${avail.toLocaleString('en-US',{minimumFractionDigits:2})} ${isCC?'available':''}</div>`;
+        bCard.appendChild(dot); bCard.appendChild(bInfo);
+        if(isSelected){ const ck=document.createElement('span'); ck.style.cssText='color:var(--teal);font-size:14px;'; ck.textContent='✓'; bCard.appendChild(ck); }
+        bCard.addEventListener('click',()=>{
+          d.bankId=bank.id; d.person=bank.name; d.currency=bank.currency||'AED';
+          buildManualDebtModal(m);
+        });
+        bkG.appendChild(bCard);
+      });
+      m.appendChild(bkG);
+      // Show impact preview if bank selected and amount entered
+      if(d.bankId && d.totalAmount){
+        const selBank=(appState.banks||[]).find(b=>b.id===d.bankId);
+        if(selBank&&selBank.type==='Credit Card'){
+          const curAvail=getBankBalance(selBank);
+          const debtAmt=parseFloat(d.totalAmount||0)-parseFloat(d.paidAmount||0);
+          const newAvail=curAvail-debtAmt;
+          const impDiv=document.createElement('div'); impDiv.style.cssText='padding:8px 12px;border-radius:var(--radius-sm);margin-bottom:10px;background:'+(newAvail<0?'var(--red-bg)':'var(--amber-bg)')+';font-size:12px;';
+          impDiv.innerHTML=`<strong>💳 Balance Impact</strong><br>Current available: <strong>${selBank.currency==='PHP'?'₱':'AED '} ${curAvail.toLocaleString('en-US',{minimumFractionDigits:2})}</strong><br>After this debt: <strong style="color:${newAvail<0?'var(--red)':'var(--teal-d)'};">${selBank.currency==='PHP'?'₱':'AED '} ${newAvail.toLocaleString('en-US',{minimumFractionDigits:2})}</strong>`;
+          m.appendChild(impDiv);
+        }
+      }
+    }
+  } else {
+    m.appendChild(fg('Person / Creditor *','text',d.person||'','e.g. John, BPI, etc.',v=>d.person=v));
+  }
   m.appendChild(fg('Description','text',d.description||'','e.g. Personal loan, credit card',v=>d.description=v));
   // Currency
   const cg=document.createElement('div'); cg.className='form-group'; cg.innerHTML='<label class="form-label">Currency</label>';
@@ -4100,6 +4176,39 @@ function buildManualDebtModal(m){
 }
 window.openDebtModal=openDebtModal;
 
+
+// ── BANK BALANCE HELPERS ──────────────────────────────────────────────────────
+function getBankBalance(bank){
+  if(!bank) return 0;
+  const taps = (appState.dailyTap||[]).filter(t=>t.bankId===bank.id);
+  const tapOut = taps.filter(t=>t.tapType==='out').reduce((s,t)=>s+(parseFloat(t.amount)||0),0);
+  const tapIn  = taps.filter(t=>t.tapType==='in' ).reduce((s,t)=>s+(parseFloat(t.amount)||0),0);
+  // Debts linked to this bank
+  const debtUsed=(appState.manualDebts||[])
+    .filter(d=>d.bankId===bank.id&&d.status!=='settled')
+    .reduce((s,d)=>s+(parseFloat(d.totalAmount||0)-parseFloat(d.paidAmount||0)),0);
+
+  if(bank.type==='Credit Card'){
+    // Available = Credit Limit - tap-outs - outstanding debts + tap-ins (payments)
+    const limit = parseFloat(bank.creditLimit||bank.balance||0);
+    return limit - tapOut - debtUsed + tapIn;
+  } else {
+    // Regular: opening balance + tap-ins - tap-outs
+    const opening = parseFloat(bank.balance||0);
+    return opening + tapIn - tapOut;
+  }
+}
+function getBankUsed(bank){
+  if(!bank||bank.type!=='Credit Card') return 0;
+  const taps = (appState.dailyTap||[]).filter(t=>t.bankId===bank.id);
+  const tapOut = taps.filter(t=>t.tapType==='out').reduce((s,t)=>s+(parseFloat(t.amount)||0),0);
+  const tapIn  = taps.filter(t=>t.tapType==='in' ).reduce((s,t)=>s+(parseFloat(t.amount)||0),0);
+  const debtUsed=(appState.manualDebts||[])
+    .filter(d=>d.bankId===bank.id&&d.status!=='settled')
+    .reduce((s,d)=>s+(parseFloat(d.totalAmount||0)-parseFloat(d.paidAmount||0)),0);
+  return tapOut + debtUsed - tapIn;
+}
+
 // ── BANKS PAGE ────────────────────────────────────────────────────────────────
 function buildBanksPage(){
   const div=document.createElement('div');
@@ -4125,14 +4234,38 @@ function buildBanksPage(){
     const accent=document.createElement('div'); accent.className='bank-card-accent'; accent.style.background=bank.color||BANK_COLORS[0];
     c.appendChild(accent);
     const tapCount=(appState.dailyTap||[]).filter(t=>t.bankId===bank.id).length;
+    const isCC=bank.type==='Credit Card';
+    const currSym=bank.currency==='PHP'?'₱':'AED ';
+    const liveBalance=getBankBalance(bank);
+    const usedAmt=getBankUsed(bank);
+    const limitAmt=parseFloat(bank.creditLimit||bank.balance||0);
+    const pct=isCC&&limitAmt>0?Math.min(100,(usedAmt/limitAmt)*100).toFixed(0):0;
+    const balColor=isCC?(liveBalance<0?'var(--red)':parseFloat(pct)>80?'var(--amber)':'var(--teal-d)'):'var(--teal-d)';
+
     c.innerHTML+=`
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-        <div class="bank-dot" style="background:${bank.color||BANK_COLORS[0]};width:10px;height:10px;"></div>
-        <div class="bank-card-type">${bank.type||'Account'}</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <div style="display:flex;align-items:center;gap:6px;">
+          <div class="bank-dot" style="background:${bank.color||BANK_COLORS[0]};width:10px;height:10px;border-radius:50%;"></div>
+          <div class="bank-card-type">${bank.type||'Account'}</div>
+        </div>
+        ${isCC?`<span style="font-size:10px;background:#DBEAFE;color:#1D4ED8;padding:2px 7px;border-radius:100px;font-weight:600;">💳 CC</span>`:''}
       </div>
       <div class="bank-card-name">${bank.name||'Unnamed Bank'}</div>
       <div class="bank-card-acct">${bank.accountNo?'●●●● '+bank.accountNo.slice(-4):''}</div>
-      <div class="bank-card-balance">${bank.currency==='PHP'?'₱':'AED '} ${parseFloat(bank.balance||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+      ${isCC?`
+        <div style="margin:8px 0 4px;">
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:4px;">
+            <span>Available</span><span style="font-weight:700;color:${balColor};">${currSym}${liveBalance.toLocaleString('en-US',{minimumFractionDigits:2})}</span>
+          </div>
+          <div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden;">
+            <div style="width:${pct}%;height:100%;background:${parseFloat(pct)>80?'var(--red)':parseFloat(pct)>60?'var(--amber)':'var(--teal)'};border-radius:3px;transition:width .3s;"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--hint);margin-top:3px;">
+            <span>Used: ${currSym}${usedAmt.toLocaleString('en-US',{minimumFractionDigits:2})}</span>
+            <span>Limit: ${currSym}${limitAmt.toLocaleString('en-US',{minimumFractionDigits:2})}</span>
+          </div>
+        </div>`
+      :`<div class="bank-card-balance" style="color:${liveBalance>=0?'var(--teal-d)':'var(--red)'};">${currSym}${liveBalance.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>`}
       ${bank.cutoffDay?`<div class="bank-card-cutoff">✂ Cutoff: Day ${bank.cutoffDay} &nbsp;·&nbsp; Coverage: ${bank.coverageStart||1}–${bank.coverageEnd||'end'}</div>`:''}
       <div style="font-size:11px;color:var(--muted);margin-top:6px;">${tapCount} tap record${tapCount!==1?'s':''}</div>
       ${bank.notes?`<div style="font-size:11px;color:var(--hint);margin-top:4px;">${bank.notes}</div>`:''}`;
@@ -4153,20 +4286,49 @@ function buildBankModal(m){
   const d=appState.modal.data; const isEdit=!!(d.name);
   const BANK_COLORS=['#1D9E75','#1D4ED8','#B45309','#7C3AED','#B91C1C','#0369A1','#166534','#C2410C'];
   const BANK_TYPES=['Checking','Savings','Credit Card','E-Wallet','Cash'];
+  const isCC = d.type==='Credit Card';
   m.innerHTML=`<div class="modal-title">${isEdit?'Edit Bank':'Add Bank Account'}</div>`;
   m.appendChild(fg('Bank Name *','text',d.name||'','e.g. Emirates NBD',v=>d.name=v));
-  // Type
+
+  // Account Type — rebuild on change so balance label updates
   const tg=document.createElement('div'); tg.className='form-group'; tg.innerHTML='<label class="form-label">Account Type</label>';
   const tSel=document.createElement('select'); tSel.className='form-select';
   BANK_TYPES.forEach(t=>{ const o=document.createElement('option'); o.value=t; o.textContent=t; if(t===d.type)o.selected=true; tSel.appendChild(o); });
-  tSel.addEventListener('change',e=>d.type=e.target.value); tg.appendChild(tSel); m.appendChild(tg);
+  tSel.addEventListener('change',e=>{ d.type=e.target.value; buildBankModal(m); });
+  tg.appendChild(tSel); m.appendChild(tg);
+
+  // Credit Card tip
+  if(isCC){
+    const tip=document.createElement('div'); tip.style.cssText='font-size:11px;color:var(--blue);background:var(--blue-bg,#EFF6FF);padding:7px 10px;border-radius:var(--radius-sm);margin-bottom:10px;';
+    tip.innerHTML='💳 Credit Card — Daily Tap purchases and Debts linked to this card will auto-deduct from the available balance.';
+    m.appendChild(tip);
+  }
+
   // Currency
   const cg=document.createElement('div'); cg.className='form-group'; cg.innerHTML='<label class="form-label">Currency</label>';
   const cSel=document.createElement('select'); cSel.className='form-select';
   ['AED','PHP','USD'].forEach(c=>{ const o=document.createElement('option'); o.value=c; o.textContent=c; if(c===(d.currency||'AED'))o.selected=true; cSel.appendChild(o); });
   cSel.addEventListener('change',e=>d.currency=e.target.value); cg.appendChild(cSel); m.appendChild(cg);
+
   m.appendChild(fg('Account Number (last 4)','text',d.accountNo||'','e.g. 1234',v=>d.accountNo=v));
-  m.appendChild(fg('Current Balance','number',d.balance||'','0.00',v=>d.balance=parseFloat(v)||0));
+
+  // Balance label changes for credit card
+  if(isCC){
+    m.appendChild(fg('Credit Limit','number',d.creditLimit||d.balance||'','0.00',v=>{ d.creditLimit=parseFloat(v)||0; d.balance=d.creditLimit; }));
+    // Show live available balance if editing
+    if(isEdit){
+      const bank=appState.banks.find(b=>b.id===d.id)||d;
+      const avail=getBankBalance({...d,...bank});
+      const used=getBankUsed({...d,...bank});
+      const pct=d.creditLimit>0?Math.min(100,(used/d.creditLimit)*100).toFixed(0):0;
+      const avDiv=document.createElement('div'); avDiv.style.cssText='padding:10px 12px;border-radius:var(--radius-sm);margin-bottom:10px;background:'+(avail<0?'var(--red-bg)':'var(--teal-bg)')+';';
+      avDiv.innerHTML=`<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px;"><span style="color:var(--muted);font-weight:600;">Available</span><span style="font-weight:700;color:${avail<0?'var(--red)':'var(--teal-d)'};">${d.currency==='PHP'?'₱':'AED '} ${avail.toLocaleString('en-US',{minimumFractionDigits:2})}</span></div><div style="height:6px;background:var(--border);border-radius:3px;"><div style="width:${pct}%;height:100%;background:${parseFloat(pct)>80?'var(--red)':parseFloat(pct)>60?'var(--amber)':'var(--teal)'};border-radius:3px;"></div></div><div style="font-size:11px;color:var(--muted);margin-top:4px;">${pct}% used · ${d.currency==='PHP'?'₱':'AED '} ${used.toLocaleString('en-US',{minimumFractionDigits:2})} of ${d.currency==='PHP'?'₱':'AED '} ${parseFloat(d.creditLimit||0).toLocaleString('en-US',{minimumFractionDigits:2})}</div>`;
+      m.appendChild(avDiv);
+    }
+  } else {
+    m.appendChild(fg('Opening Balance','number',d.balance||'','0.00',v=>d.balance=parseFloat(v)||0));
+  }
+
   // Cutoff settings
   const cutHdr=document.createElement('div'); cutHdr.style.cssText='font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin:14px 0 8px;padding-top:10px;border-top:1px solid var(--border);';
   cutHdr.textContent='Statement Cutoff Settings'; m.appendChild(cutHdr);
@@ -4175,20 +4337,24 @@ function buildBankModal(m){
   cr.appendChild(fg('Coverage From (day)','number',d.coverageStart||'','e.g. 16',v=>d.coverageStart=parseInt(v)||''));
   cr.appendChild(fg('Coverage To (day)','number',d.coverageEnd||'','e.g. 15',v=>d.coverageEnd=parseInt(v)||''));
   m.appendChild(cr);
+
   // Color
   const colG=document.createElement('div'); colG.className='form-group'; colG.innerHTML='<label class="form-label">Color</label>';
   const colRow=document.createElement('div'); colRow.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;';
   BANK_COLORS.forEach(col=>{ const dot=document.createElement('div'); dot.style.cssText=`width:24px;height:24px;border-radius:50%;background:${col};cursor:pointer;border:3px solid ${d.color===col?'var(--text)':'transparent'};transition:all .12s;`; dot.addEventListener('click',()=>{d.color=col;buildBankModal(m);}); colRow.appendChild(dot); }); colG.appendChild(colRow); m.appendChild(colG);
   m.appendChild(fg('Notes','text',d.notes||'','Optional notes',v=>d.notes=v));
+
   const foot=document.createElement('div'); foot.className='modal-footer';
   const cancel=document.createElement('button'); cancel.className='btn btn-outline'; cancel.textContent='Cancel'; cancel.addEventListener('click',()=>{appState.modal=null;render();});
   const save=document.createElement('button'); save.className='btn btn-primary'; save.textContent=isEdit?'Save Changes':'Add Bank';
   save.addEventListener('click',()=>{
     if(!d.name){toast('Bank name required');return;}
+    if(isCC&&!d.creditLimit){toast('Enter credit limit');return;}
     const idx=appState.banks.findIndex(b=>b.id===d.id);
     if(idx>-1) appState.banks[idx]={...d}; else appState.banks.push({...d});
     saveLocal(); appState.modal=null; toast(isEdit?'Bank updated!':'Bank added!'); render();
   });
+  if(isEdit){ const del=document.createElement('button'); del.className='btn btn-danger'; del.textContent='Delete'; del.addEventListener('click',()=>{ if(confirm('Delete '+d.name+'?')){ appState.banks=appState.banks.filter(b=>b.id!==d.id); saveLocal(); appState.modal=null; toast('Bank removed'); render(); }}); foot.appendChild(del); }
   foot.appendChild(cancel); foot.appendChild(save); m.appendChild(foot);
 }
 window.openBankModal=openBankModal;
@@ -4656,7 +4822,20 @@ function buildTapModal(m){
   const bkSel=document.createElement('select'); bkSel.className='form-select';
   if(!appState.banks||!appState.banks.length){ bkSel.innerHTML='<option value="">No banks set up</option>'; }
   else { appState.banks.forEach(b=>{ const o=document.createElement('option'); o.value=b.id; o.textContent=b.name; if(b.id===d.bankId)o.selected=true; bkSel.appendChild(o); }); }
-  bkSel.addEventListener('change',e=>d.bankId=e.target.value); bkG.appendChild(bkSel); m.appendChild(bkG);
+  bkSel.addEventListener('change',e=>{ d.bankId=e.target.value; buildTapModal(m); }); bkG.appendChild(bkSel);
+  // Show balance preview for selected bank
+  if(d.bankId){
+    const selBank=(appState.banks||[]).find(b=>b.id===d.bankId);
+    if(selBank){
+      const isCC=selBank.type==='Credit Card';
+      const avail=getBankBalance(selBank);
+      const sym=selBank.currency==='PHP'?'₱':'AED ';
+      const bPrev=document.createElement('div'); bPrev.style.cssText='font-size:12px;padding:6px 10px;border-radius:var(--radius-sm);margin-top:6px;background:'+(isCC?(avail<0?'var(--red-bg)':'var(--teal-bg)'):'var(--bg)')+';color:var(--muted);border:1px solid var(--border);';
+      bPrev.innerHTML=`${isCC?'💳 Available':'💰 Balance'}: <strong style="color:${avail<0?'var(--red)':'var(--teal-d)'};">${sym}${avail.toLocaleString('en-US',{minimumFractionDigits:2})}</strong>${isCC?' (credit card)':''}`;
+      bkG.appendChild(bPrev);
+    }
+  }
+  m.appendChild(bkG);
   m.appendChild(fg('Date','date',d.date,'',v=>d.date=v));
   m.appendChild(fg('Description *','text',d.description||'','e.g. Groceries',v=>d.description=v));
   // Type
