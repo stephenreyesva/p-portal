@@ -707,7 +707,7 @@ function logout(){ appState.loggedIn=false; _autoLoaded=false; sessionStorage.re
 function saveLocal(){
   localStorage.setItem('pv_data',JSON.stringify({
     clients:appState.clients,clientData:appState.clientData,
-    budget:appState.budget,budgetCurrency:appState.budgetCurrency,
+    budget:appState.budget,budgetCurrency:appState.budgetCurrency,collectables:appState.collectables,
     banks:appState.banks,monthlyBudget:appState.monthlyBudget,customCategories:appState.customCategories,
     dailyTap:appState.dailyTap,bookkeeping:appState.bookkeeping,
     dashIncome:appState.dashIncome,dashExpense:appState.dashExpense,
@@ -722,6 +722,7 @@ function loadLocal(){
     if(d.clientData)appState.clientData=d.clientData;
     if(d.budget){ appState.budget=Object.assign({income:[],expenses:[],debts:[]},d.budget); }
     if(d.budgetCurrency) appState.budgetCurrency=d.budgetCurrency;
+    if(d.collectables) appState.collectables=d.collectables;
     if(d.banks) appState.banks=d.banks;
     if(d.monthlyBudget) appState.monthlyBudget=d.monthlyBudget;
     if(d.customCategories) appState.customCategories=d.customCategories;
@@ -2296,6 +2297,9 @@ function buildModal(){
   if(appState.modal.type==='mb_item'){
     m.style.maxWidth='440px'; buildMBItemModal(m); ov.appendChild(m); return ov;
   }
+  if(appState.modal.type==='collectable_entry'){
+    m.style.maxWidth='460px'; buildCollectableModal(m); ov.appendChild(m); return ov;
+  }
   if(appState.modal.type==='custom_cat_entry'){
     m.style.maxWidth='420px'; buildCustomCatEntryModal(m); ov.appendChild(m); return ov;
   }
@@ -2685,6 +2689,7 @@ function buildBudgetTracker(){
     {id:'daily',label:'Daily Tap',icon:'<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>'},
     {id:'banks',label:'Banks',icon:'<rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/>'},
     {id:'others',label:'Debts',icon:'<rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/>'},
+    {id:'collectables',label:'Collectables',icon:'<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/>'},
     {id:'addnew',label:'Add New',icon:'<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>'},
   ];
   const subNav=document.createElement('div'); subNav.className='budget-subnav';
@@ -2714,6 +2719,9 @@ function buildBudgetTracker(){
   }
   if(appState.budgetSubTab==='bookkeeping'){
     contentArea.appendChild(buildBookkeepingPage()); budgetLayout.appendChild(contentArea); div.appendChild(budgetLayout); return div;
+  }
+  if(appState.budgetSubTab==='collectables'){
+    contentArea.appendChild(buildCollectablesPage()); budgetLayout.appendChild(contentArea); div.appendChild(budgetLayout); return div;
   }
   if(appState.budgetSubTab==='addnew'){
     contentArea.appendChild(buildAddNewCategoryPage()); budgetLayout.appendChild(contentArea); div.appendChild(budgetLayout); return div;
@@ -3581,6 +3589,220 @@ function buildDashboardSummaryPanels(bm, by, cur){
 }
 
 // ── FAMILY MEMBER PAGE ────────────────────────────────────────────────────────
+
+
+// ── COLLECTABLES PAGE ─────────────────────────────────────────────────────────
+// Tracks money owed TO you — receivables
+function buildCollectablesPage(){
+  if(!appState.collectables) appState.collectables=[];
+  const cols=appState.collectables;
+  const div=document.createElement('div');
+
+  // ── Header ─────────────────────────────────────────────────────────────────
+  const hdr=document.createElement('div'); hdr.className='page-header';
+  hdr.innerHTML='<div><div class="page-title">💰 Collectables</div><div class="page-sub">Money owed to you — track receivables</div></div>';
+  const addBtn=document.createElement('button'); addBtn.className='btn btn-primary';
+  addBtn.innerHTML=`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Add Collectable`;
+  addBtn.addEventListener('click',()=>{ appState.modal={type:'collectable_entry',data:{id:'col_'+Date.now(),person:'',description:'',amount:'',collected:0,currency:'AED',status:'pending',dueDate:'',notes:'',createdAt:new Date().toISOString().slice(0,10)}}; render(); });
+  hdr.appendChild(addBtn); div.appendChild(hdr);
+
+  // ── Summary stats ───────────────────────────────────────────────────────────
+  const pending=cols.filter(c=>c.status!=='collected');
+  const totalPending=pending.reduce((s,c)=>s+(parseFloat(c.amount||0)-parseFloat(c.collected||0)),0);
+  const totalCollected=cols.filter(c=>c.status==='collected').reduce((s,c)=>s+(parseFloat(c.amount||0)),0);
+  const partial=cols.filter(c=>c.status==='partial');
+  const totalPartial=partial.reduce((s,c)=>s+(parseFloat(c.amount||0)-parseFloat(c.collected||0)),0);
+
+  const sg=document.createElement('div'); sg.className='stats-grid'; sg.style.cssText='grid-template-columns:repeat(3,1fr);margin-bottom:1.25rem;';
+  sg.innerHTML=`
+    <div class="stat-card" style="border-left:3px solid var(--amber)">
+      <div class="stat-label">Pending</div>
+      <div class="stat-value" style="color:var(--amber)">AED ${totalPending.toLocaleString('en-US',{minimumFractionDigits:2})}</div>
+      <div class="stat-sub">${pending.length} item${pending.length!==1?'s':''} to collect</div>
+    </div>
+    <div class="stat-card" style="border-left:3px solid var(--blue)">
+      <div class="stat-label">Partially Collected</div>
+      <div class="stat-value" style="color:var(--blue)">AED ${totalPartial.toLocaleString('en-US',{minimumFractionDigits:2})}</div>
+      <div class="stat-sub">${partial.length} item${partial.length!==1?'s':''} in progress</div>
+    </div>
+    <div class="stat-card" style="border-left:3px solid var(--teal)">
+      <div class="stat-label">Fully Collected</div>
+      <div class="stat-value" style="color:var(--teal-d)">AED ${totalCollected.toLocaleString('en-US',{minimumFractionDigits:2})}</div>
+      <div class="stat-sub">${cols.filter(c=>c.status==='collected').length} completed</div>
+    </div>`;
+  div.appendChild(sg);
+
+  // ── Filter tabs ─────────────────────────────────────────────────────────────
+  if(!appState.colFilter) appState.colFilter='all';
+  const tabs=document.createElement('div'); tabs.className='budget-tabs'; tabs.style.marginBottom='1rem';
+  [{id:'all',label:'All'},{id:'pending',label:'Pending'},{id:'partial',label:'Partial'},{id:'collected',label:'Collected'}].forEach(t=>{
+    const btn=document.createElement('button'); btn.className='bt-tab'+(appState.colFilter===t.id?' active':'');
+    const cnt=t.id==='all'?cols.length:cols.filter(c=>c.status===t.id).length;
+    btn.textContent=`${t.label} (${cnt})`;
+    btn.addEventListener('click',()=>{ appState.colFilter=t.id; render(); });
+    tabs.appendChild(btn);
+  });
+  div.appendChild(tabs);
+
+  const filtered=appState.colFilter==='all'?cols:cols.filter(c=>c.status===appState.colFilter);
+  const sorted=[...filtered].sort((a,b)=>{
+    const order={pending:0,partial:1,collected:2};
+    return (order[a.status]||0)-(order[b.status]||0) || (a.dueDate||'').localeCompare(b.dueDate||'');
+  });
+
+  // ── Table ───────────────────────────────────────────────────────────────────
+  const card=document.createElement('div'); card.className='card';
+  if(!sorted.length){
+    const emp=document.createElement('div'); emp.className='empty';
+    emp.innerHTML=`<div class="empty-icon">💰</div><p>${appState.colFilter==='all'?'No collectables yet. Add money someone owes you.':'No '+appState.colFilter+' items.'}</p>`;
+    card.appendChild(emp);
+  } else {
+    const tw=document.createElement('div'); tw.className='table-wrap';
+    const tbl=document.createElement('table');
+    tbl.innerHTML=`<thead><tr>
+      <th>Ref #</th><th>From (Person/Company)</th><th>Description</th>
+      <th>Total Amount</th><th>Collected</th><th>Remaining</th>
+      <th>Due Date</th><th>Status</th><th></th>
+    </tr></thead>`;
+    const tbody=document.createElement('tbody');
+
+    sorted.forEach((col,idx)=>{
+      const amt=parseFloat(col.amount||0);
+      const collected=parseFloat(col.collected||0);
+      const remaining=amt-collected;
+      const pct=amt>0?Math.min(100,(collected/amt)*100).toFixed(0):0;
+      const sym=col.currency==='PHP'?'₱':col.currency==='USD'?'$':'AED ';
+      const isOverdue=col.dueDate&&col.status!=='collected'&&new Date(col.dueDate)<new Date();
+      const statusColors={pending:'var(--amber)',partial:'var(--blue)',collected:'var(--teal-d)'};
+      const statusBg={pending:'var(--amber-bg)',partial:'var(--blue-bg,#EFF6FF)',collected:'var(--teal-bg)'};
+
+      const tr=document.createElement('tr');
+      tr.style.cssText=col.status==='collected'?'opacity:0.6':'';
+
+      tr.innerHTML=`
+        <td style="font-size:11px;color:var(--muted);white-space:nowrap">COL-${String(idx+1).padStart(4,'0')}</td>
+        <td style="font-weight:600">${col.person||'—'}</td>
+        <td style="color:var(--muted);font-size:12px">${col.description||'—'}</td>
+        <td style="font-weight:600">${sym}${amt.toLocaleString('en-US',{minimumFractionDigits:2})}</td>
+        <td style="color:var(--teal-d)">${sym}${collected.toLocaleString('en-US',{minimumFractionDigits:2})}
+          ${amt>0&&collected>0?`<div style="margin-top:3px;height:4px;background:var(--border);border-radius:2px;width:60px;"><div style="width:${pct}%;height:100%;background:var(--teal);border-radius:2px;"></div></div>`:''}
+        </td>
+        <td style="font-weight:700;color:${remaining>0?'var(--red)':'var(--teal-d)'}">${remaining>0?sym+remaining.toLocaleString('en-US',{minimumFractionDigits:2}):'✓ Done'}</td>
+        <td style="white-space:nowrap;${isOverdue?'color:var(--red);font-weight:600;':''}">${col.dueDate?new Date(col.dueDate+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+(isOverdue?' ⚠':''):'—'}</td>
+        <td></td>
+        <td style="white-space:nowrap;display:flex;gap:4px;align-items:center;padding-top:6px;"></td>`;
+
+      // Status selector
+      const stCell=tr.cells[7];
+      const sSel=document.createElement('select'); sSel.className=`status-sel ${col.status||'pending'}`;
+      sSel.style.cssText=`font-size:11px;padding:3px 6px;border-radius:100px;border:none;font-weight:600;background:${statusBg[col.status]||statusBg.pending};color:${statusColors[col.status]||statusColors.pending};cursor:pointer;`;
+      [{val:'pending',label:'Pending'},{val:'partial',label:'Partial'},{val:'collected',label:'✓ Collected'}].forEach(s=>{
+        const o=document.createElement('option'); o.value=s.val; o.textContent=s.label; if(s.val===col.status)o.selected=true; sSel.appendChild(o);
+      });
+      sSel.addEventListener('change',e=>{
+        const c=appState.collectables.find(x=>x.id===col.id);
+        if(c){ c.status=e.target.value; if(e.target.value==='collected'&&!c.collected) c.collected=c.amount; saveLocal(); toast('Status updated'); render(); }
+      });
+      stCell.appendChild(sSel);
+
+      // Action buttons
+      const actCell=tr.cells[8];
+      const editBtn=document.createElement('button'); editBtn.className='btn btn-outline btn-sm'; editBtn.textContent='Edit';
+      editBtn.addEventListener('click',()=>{ appState.modal={type:'collectable_entry',data:{...col}}; render(); });
+      const delBtn=document.createElement('button'); delBtn.className='delbtn'; delBtn.innerHTML='&times;';
+      delBtn.addEventListener('click',()=>{ if(!confirm('Delete this collectable?'))return; appState.collectables=appState.collectables.filter(x=>x.id!==col.id); saveLocal(); toast('Deleted'); render(); });
+      actCell.appendChild(editBtn); actCell.appendChild(delBtn);
+
+      tbody.appendChild(tr);
+    });
+    tbl.appendChild(tbody); tw.appendChild(tbl); card.appendChild(tw);
+
+    // Totals footer
+    const totDiv=document.createElement('div'); totDiv.style.cssText='display:flex;justify-content:space-between;padding:10px 16px;background:var(--bg);border-top:1px solid var(--border);font-size:12px;';
+    totDiv.innerHTML=`<span style="color:var(--muted);">${sorted.length} record${sorted.length!==1?'s':''}</span><span style="font-weight:700;color:var(--amber);">Pending: AED ${totalPending.toLocaleString('en-US',{minimumFractionDigits:2})}</span>`;
+    card.appendChild(totDiv);
+  }
+  div.appendChild(card);
+  return div;
+}
+
+// ── COLLECTABLE MODAL ─────────────────────────────────────────────────────────
+function buildCollectableModal(m){
+  const d=appState.modal.data;
+  const isEdit=!!(appState.collectables||[]).find(c=>c.id===d.id);
+  m.innerHTML=`<div class="modal-title">${isEdit?'Edit':'Add'} Collectable</div>`;
+
+  m.appendChild(fg('From (Person / Company) *','text',d.person||'','e.g. John Doe, BPI, Client name',v=>d.person=v));
+  m.appendChild(fg('Description','text',d.description||'','e.g. Loan, deposit refund, invoice payment',v=>d.description=v));
+
+  // Currency
+  const curG=document.createElement('div'); curG.className='form-group'; curG.innerHTML='<label class="form-label">Currency</label>';
+  const curRow=document.createElement('div'); curRow.style.cssText='display:flex;gap:6px;';
+  ['AED','PHP','USD'].forEach(c=>{
+    const btn=document.createElement('button'); btn.type='button';
+    btn.className='btn btn-sm'+((d.currency||'AED')===c?' btn-primary':' btn-outline');
+    btn.textContent=c==='AED'?'🇦🇪 AED':c==='PHP'?'🇵🇭 PHP':'🇺🇸 USD';
+    btn.addEventListener('click',()=>{ d.currency=c; buildCollectableModal(m); });
+    curRow.appendChild(btn);
+  });
+  curG.appendChild(curRow); m.appendChild(curG);
+
+  // Total amount
+  const amtG=document.createElement('div'); amtG.className='form-group'; amtG.innerHTML='<label class="form-label">Total Amount *</label>';
+  const amtInp=document.createElement('input'); amtInp.className='form-input'; amtInp.type='number'; amtInp.step='0.01'; amtInp.placeholder='0.00'; amtInp.value=d.amount||'';
+  amtInp.addEventListener('input',e=>d.amount=parseFloat(e.target.value)||0);
+  amtG.appendChild(amtInp); m.appendChild(amtG);
+
+  // Amount already collected
+  const colG=document.createElement('div'); colG.className='form-group'; colG.innerHTML='<label class="form-label">Amount Already Collected <span style="color:var(--hint);font-weight:400;">(0 if none yet)</span></label>';
+  const colInp=document.createElement('input'); colInp.className='form-input'; colInp.type='number'; colInp.step='0.01'; colInp.placeholder='0.00'; colInp.value=d.collected||'';
+  colInp.addEventListener('input',e=>{ d.collected=parseFloat(e.target.value)||0; buildCollectableModal(m); });
+  colG.appendChild(colInp); m.appendChild(colG);
+
+  // Remaining preview
+  const tot=parseFloat(d.amount||0); const coll=parseFloat(d.collected||0); const rem=tot-coll;
+  if(tot>0){
+    const sym=d.currency==='PHP'?'₱':d.currency==='USD'?'$':'AED ';
+    const prev=document.createElement('div'); prev.style.cssText='font-size:12px;padding:8px 12px;border-radius:var(--radius-sm);margin-bottom:10px;background:'+(rem<=0?'var(--teal-bg)':'var(--amber-bg)')+';';
+    prev.innerHTML=rem<=0
+      ?`<strong style="color:var(--teal-d)">✓ Fully collected</strong>`
+      :`Remaining to collect: <strong style="color:var(--amber);">${sym}${rem.toLocaleString('en-US',{minimumFractionDigits:2})}</strong> (${tot>0?((coll/tot)*100).toFixed(0):0}% done)`;
+    m.appendChild(prev);
+  }
+
+  // Status
+  const stG=document.createElement('div'); stG.className='form-group'; stG.innerHTML='<label class="form-label">Status</label>';
+  const stSel=document.createElement('select'); stSel.className='form-select';
+  [{v:'pending',l:'Pending'},{v:'partial',l:'Partially Collected'},{v:'collected',l:'✓ Fully Collected'}].forEach(s=>{
+    const o=document.createElement('option'); o.value=s.v; o.textContent=s.l; if(s.v===d.status)o.selected=true; stSel.appendChild(o);
+  });
+  stSel.addEventListener('change',e=>d.status=e.target.value); stG.appendChild(stSel); m.appendChild(stG);
+
+  m.appendChild(fg('Due Date','date',d.dueDate||'','',v=>d.dueDate=v));
+  m.appendChild(fg('Notes','text',d.notes||'','Optional — reference, terms, etc.',v=>d.notes=v));
+
+  const foot=document.createElement('div'); foot.className='modal-footer';
+  const cancel=document.createElement('button'); cancel.className='btn btn-outline'; cancel.textContent='Cancel'; cancel.addEventListener('click',()=>{appState.modal=null;render();});
+  const save=document.createElement('button'); save.className='btn btn-primary'; save.textContent=isEdit?'Save Changes':'Add Collectable';
+  save.addEventListener('click',()=>{
+    if(!d.person){toast('Enter a person or company name');return;}
+    if(!d.amount||parseFloat(d.amount)<=0){toast('Enter a valid amount');return;}
+    if(!appState.collectables) appState.collectables=[];
+    const entry={...d,amount:parseFloat(d.amount),collected:parseFloat(d.collected||0)};
+    // Auto-set status based on amounts
+    if(entry.collected>=entry.amount) entry.status='collected';
+    else if(entry.collected>0) entry.status='partial';
+    const idx=appState.collectables.findIndex(c=>c.id===d.id);
+    if(idx>-1) appState.collectables[idx]=entry; else appState.collectables.push(entry);
+    saveLocal(); appState.modal=null; toast(isEdit?'✓ Updated!':'✓ Collectable added!'); render();
+  });
+  if(isEdit){
+    const del=document.createElement('button'); del.className='btn btn-danger'; del.textContent='Delete';
+    del.addEventListener('click',()=>{ if(!confirm('Delete?'))return; appState.collectables=appState.collectables.filter(c=>c.id!==d.id); saveLocal(); appState.modal=null; toast('Deleted'); render(); });
+    foot.appendChild(del);
+  }
+  foot.appendChild(cancel); foot.appendChild(save); m.appendChild(foot);
+}
 
 // ── ADD NEW CATEGORY PAGE ────────────────────────────────────────────────────
 function buildAddNewCategoryPage(){
