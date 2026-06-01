@@ -2662,7 +2662,6 @@ function buildBudgetTracker(){
   htxt.innerHTML=`<div class="page-title">Budget Tracker</div><div class="page-sub"><span style="background:var(--amber-bg);color:var(--amber);font-size:10px;font-weight:600;padding:2px 7px;border-radius:100px;margin-right:6px;">NEXT MONTH PLAN</span>${MONTHS[bm]} ${by} &nbsp;&middot;&nbsp; ${CURRENCIES[cur].flag} ${CURRENCIES[cur].name}</div>`;
   hdr.appendChild(htxt);
   const hdrRight=document.createElement('div'); hdrRight.style.cssText='display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
-  hdrRight.appendChild(buildCurrencySelector());
   const ms=document.createElement('div'); ms.className='month-selector no-print';
   const mSel=document.createElement('select');
   MONTHS.forEach((m,i)=>{ const o=document.createElement('option'); o.value=i; o.textContent=m; if(i===bm)o.selected=true; mSel.appendChild(o); });
@@ -2676,39 +2675,7 @@ function buildBudgetTracker(){
   hdr.appendChild(hdrRight);
   div.appendChild(hdr);
 
-  // ── FX rate note ───────────────────────────────────────────────
-  if(cur !== 'USD'){
-    const rateNote=document.createElement('div');
-    const rate=fxRates[cur];
-    rateNote.style.cssText='font-size:11px;color:var(--muted);margin-bottom:1rem;padding:6px 12px;background:var(--bg);border-radius:var(--radius-sm);border:1px solid var(--border);display:inline-flex;align-items:center;gap:6px;';
-    rateNote.innerHTML=`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> Amounts stored in USD &nbsp;&middot;&nbsp; 1 USD = ${CURRENCIES[cur].symbol}${rate ? rate.toFixed(4) : '...'} ${cur} ${fxFetched ? '<span style="color:var(--teal)">&#10003; live</span>' : '(approx.)'}`;
-    div.appendChild(rateNote);
-  }
-
-  // ── Stats row ──────────────────────────────────────────────────
-  const sg=document.createElement('div'); sg.className='stats-grid'; sg.style.gridTemplateColumns='repeat(4,1fr)';
-  sg.innerHTML=`
-    <div class="stat-card stat-card-income">
-      <div class="stat-label">Income</div>
-      <div class="stat-value teal">${budgetFmt(totalIn,cur)}</div>
-      <div class="stat-sub">${mIncome.length} entr${mIncome.length===1?'y':'ies'} this month</div>
-    </div>
-    <div class="stat-card stat-card-expense">
-      <div class="stat-label">Expenses</div>
-      <div class="stat-value" style="color:var(--red)">${budgetFmt(totalEx,cur)}</div>
-      <div class="stat-sub">${mExpenses.length} entr${mExpenses.length===1?'y':'ies'} this month</div>
-    </div>
-    <div class="stat-card ${netBal>=0?'stat-card-balance-pos':'stat-card-balance-neg'}">
-      <div class="stat-label">Net Balance</div>
-      <div class="stat-value" style="color:${netBal>=0?'var(--blue)':'var(--red)'}">${netBal>=0?'+':''}${budgetFmt(netBal,cur)}</div>
-      <div class="stat-sub">${netBal>=0?'Surplus':'Deficit'} for ${MONTHS[bm]}</div>
-    </div>
-    <div class="stat-card stat-card-debt" style="cursor:pointer;" onclick="openDebtModal(null)">
-      <div class="stat-label">Outstanding Debts <span style="font-size:9px;background:var(--amber-bg);color:var(--amber);padding:1px 5px;border-radius:4px;margin-left:4px;">+ Add</span></div>
-      <div class="stat-value" style="color:var(--amber)">${(()=>{ const mds=(appState.manualDebts||[]).filter(d=>d.status!=='settled'); const tot=mds.reduce((s,d)=>s+(parseFloat(d.totalAmount||0)-parseFloat(d.paidAmount||0)),0); return 'AED '+tot.toLocaleString('en-US',{minimumFractionDigits:2}); })()}</div>
-      <div class="stat-sub">${(appState.manualDebts||[]).filter(d=>d.status!=='settled').length} active · click to add</div>
-    </div>`;
-  div.appendChild(sg);
+  // ── Stats row (shown only on Dashboard sub-tab, not duplicated here)
 
   // ── Budget Sub-Nav + Routing ────────────────────────────────────
   const subNavItems=[
@@ -5483,78 +5450,186 @@ function openBKImportModal(){
 }
 function buildBKImportModal(m){
   const bm=appState.budgetMonth, by=appState.budgetYear;
+  const MONTHS_N=['January','February','March','April','May','June','July','August','September','October','November','December'];
   const mbItems=(appState.monthlyBudget||[]).filter(i=>i.month===bm&&i.year===by);
   const dashInc=(appState.dashIncome||[]).filter(i=>i.month===bm&&i.year===by);
   const dashExp=(appState.dashExpense||[]).filter(i=>i.month===bm&&i.year===by);
-  const MONTHS_N=['January','February','March','April','May','June','July','August','September','October','November','December'];
-
-  m.innerHTML=`<div class="modal-title">Import from Budget — ${MONTHS_N[bm]} ${by}</div>`;
-
-  const note=document.createElement('div'); note.style.cssText='font-size:12px;background:var(--blue-bg);border:1px solid #BFDBFE;border-radius:var(--radius-sm);padding:8px 12px;margin-bottom:14px;color:var(--blue);';
-  note.innerHTML=`Select a budget item below. It will pre-fill the transaction form with description, reference #, and amount. You can review and edit before posting.`;
-  m.appendChild(note);
 
   const incItems=[...mbItems.filter(i=>i.type==='income'), ...dashInc];
   const expItems=[...mbItems.filter(i=>i.type==='expense'), ...dashExp];
+  const allItems=[
+    ...incItems.map(i=>({...i,_txType:'income'})),
+    ...expItems.map(i=>({...i,_txType:'expense'}))
+  ];
 
-  function makeSection(title, items, txType){
-    if(!items.length) return;
-    const hdr=document.createElement('div'); hdr.style.cssText='font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--muted);margin:10px 0 6px;'; hdr.textContent=title; m.appendChild(hdr);
-    items.forEach(item=>{
+  // Track which items user has selected (by item id)
+  if(!m._selected) m._selected = new Set();
+  const selected = m._selected;
+
+  m.innerHTML=`<div class="modal-title">Import from Budget — ${MONTHS_N[bm]} ${by}</div>`;
+  m.style.maxWidth='620px';
+
+  // Tip
+  const note=document.createElement('div'); note.style.cssText='font-size:12px;background:var(--blue-bg,#EFF6FF);border:1px solid #BFDBFE;border-radius:var(--radius-sm);padding:8px 12px;margin-bottom:14px;color:var(--blue);';
+  note.innerHTML='✓ Tick the items you want to post to Bookkeeping. Posted items are removed from this list.';
+  m.appendChild(note);
+
+  if(!allItems.length){
+    const emp=document.createElement('div'); emp.style.cssText='text-align:center;padding:2.5rem;color:var(--muted);font-size:13px;';
+    emp.innerHTML=`<div style="font-size:28px;margin-bottom:8px;opacity:0.3">📋</div>No budget entries for ${MONTHS_N[bm]} ${by}.<br><small style="color:var(--hint)">Add items in Monthly Budget or Dashboard first.</small>`;
+    m.appendChild(emp);
+  } else {
+    // ── Table ──────────────────────────────────────────────────────────
+    const tw=document.createElement('div'); tw.style.cssText='overflow-x:auto;max-height:380px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:12px;';
+    const tbl=document.createElement('table'); tbl.style.cssText='width:100%;border-collapse:collapse;font-size:13px;';
+    tbl.innerHTML=`<thead><tr style="background:var(--bg);position:sticky;top:0;z-index:1;">
+      <th style="width:36px;padding:8px 10px;"><input type="checkbox" id="bk-import-all" title="Select all"></th>
+      <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);">Description</th>
+      <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);">Category</th>
+      <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);">Type</th>
+      <th style="padding:8px 10px;text-align:right;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);">Amount</th>
+      <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);">Status</th>
+    </tr></thead>`;
+    const tbody=document.createElement('tbody');
+
+    allItems.forEach(item=>{
       const label=item.label||item.name||item.category||'Entry';
       const amt=parseFloat(item.amount||0);
       const cur=item.currency||'AED';
       const sym=cur==='PHP'?'₱':cur==='USD'?'$':'AED ';
-      // Check if already logged
+      const txType=item._txType;
       const alreadyLogged=(appState.bookkeeping.transactions||[]).some(t=>t.srcLabel===label&&t.txType===txType);
-      const row=document.createElement('div');
-      row.style.cssText=`display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:5px;cursor:pointer;transition:all .12s;background:var(--white);${alreadyLogged?'opacity:0.55':''}`;
-      row.innerHTML=`
-        <div>
-          <div style="font-size:13px;font-weight:500">${label}${alreadyLogged?'<span style="font-size:10px;background:var(--teal-bg);color:var(--teal-d);padding:1px 5px;border-radius:4px;margin-left:6px;">✓ Logged</span>':''}</div>
-          <div style="font-size:11px;color:var(--muted)">${item.category||txType}</div>
-        </div>
-        <div style="text-align:right">
-          <div style="font-weight:600;color:${txType==='income'?'var(--teal)':'var(--red)'}">${sym}${amt.toLocaleString('en-US',{minimumFractionDigits:2})}</div>
-        </div>`;
-      row.addEventListener('mouseenter',()=>{ if(!alreadyLogged) row.style.borderColor='var(--teal)'; });
-      row.addEventListener('mouseleave',()=>row.style.borderColor='var(--border)');
-      row.addEventListener('click',()=>{
-        // Build a pre-filled transaction
-        const accId = txType==='income'
-          ? (appState.bookkeeping.accounts.find(a=>a.id==='bk_rev')||appState.bookkeeping.accounts[0])?.id||''
-          : (appState.bookkeeping.accounts.find(a=>a.id==='bk_op')||appState.bookkeeping.accounts[0])?.id||'';
-        const ref = generateBKRef(txType, label);
-        appState.modal={type:'bk_tx', data:{
-          id:'bktx_'+Date.now(),
-          date:new Date().toISOString().slice(0,10),
-          ref, description:label,
-          txType, accountId:accId,
-          amount:amt, currency:cur,
-          notes:'', srcLabel:label
-        }};
-        render();
+      const isSelected=selected.has(item.id);
+
+      const tr=document.createElement('tr');
+      tr.style.cssText=`border-bottom:1px solid var(--border);background:${alreadyLogged?'var(--bg)':isSelected?'var(--teal-bg)':'var(--white)'};transition:background .1s;${alreadyLogged?'opacity:0.45':''}`;
+
+      // Checkbox cell
+      const chkTd=document.createElement('td'); chkTd.style.cssText='padding:8px 10px;text-align:center;';
+      const chk=document.createElement('input'); chk.type='checkbox'; chk.checked=isSelected; chk.disabled=alreadyLogged;
+      chk.addEventListener('change',e=>{
+        if(e.target.checked) selected.add(item.id); else selected.delete(item.id);
+        buildBKImportModal(m);
       });
-      m.appendChild(row);
+      chkTd.appendChild(chk); tr.appendChild(chkTd);
+
+      // Description
+      const descTd=document.createElement('td'); descTd.style.cssText='padding:8px 10px;font-weight:500;';
+      descTd.textContent=label; tr.appendChild(descTd);
+
+      // Category
+      const catTd=document.createElement('td'); catTd.style.cssText='padding:8px 10px;';
+      catTd.innerHTML=`<span style="font-size:11px;background:var(--bg);border:1px solid var(--border);padding:2px 7px;border-radius:100px;color:var(--muted);">${item.category||'—'}</span>`;
+      tr.appendChild(catTd);
+
+      // Type badge
+      const typeTd=document.createElement('td'); typeTd.style.cssText='padding:8px 10px;';
+      typeTd.innerHTML=`<span style="font-size:11px;padding:2px 7px;border-radius:100px;font-weight:600;background:${txType==='income'?'var(--teal-bg)':'var(--red-bg)'};color:${txType==='income'?'var(--teal-d)':'var(--red)'};">${txType==='income'?'Income':'Expense'}</span>`;
+      tr.appendChild(typeTd);
+
+      // Amount
+      const amtTd=document.createElement('td'); amtTd.style.cssText=`padding:8px 10px;text-align:right;font-weight:700;color:${txType==='income'?'var(--teal)':'var(--red)'};`;
+      amtTd.textContent=sym+amt.toLocaleString('en-US',{minimumFractionDigits:2});
+      tr.appendChild(amtTd);
+
+      // Status
+      const stTd=document.createElement('td'); stTd.style.cssText='padding:8px 10px;';
+      stTd.innerHTML=alreadyLogged
+        ?`<span style="font-size:11px;background:var(--teal-bg);color:var(--teal-d);padding:2px 7px;border-radius:100px;">✓ Posted</span>`
+        :`<span style="font-size:11px;color:var(--hint);">Pending</span>`;
+      tr.appendChild(stTd);
+
+      // Click row to toggle (if not already logged)
+      tr.style.cursor=alreadyLogged?'default':'pointer';
+      tr.addEventListener('click',e=>{
+        if(alreadyLogged||e.target===chk) return;
+        if(selected.has(item.id)) selected.delete(item.id); else selected.add(item.id);
+        buildBKImportModal(m);
+      });
+
+      tbody.appendChild(tr);
     });
+    tbl.appendChild(tbody); tw.appendChild(tbl); m.appendChild(tw);
+
+    // Select-all checkbox logic
+    const allChk=tbl.querySelector('#bk-import-all');
+    const eligible=allItems.filter(i=>!(appState.bookkeeping.transactions||[]).some(t=>t.srcLabel===(i.label||i.name||i.category||'Entry')&&t.txType===i._txType));
+    if(allChk){
+      allChk.checked=eligible.length>0&&eligible.every(i=>selected.has(i.id));
+      allChk.addEventListener('change',e=>{
+        eligible.forEach(i=>{ if(e.target.checked) selected.add(i.id); else selected.delete(i.id); });
+        buildBKImportModal(m);
+      });
+    }
+
+    // ── Summary footer ─────────────────────────────────────────────────────
+    if(selected.size>0){
+      const selItems=allItems.filter(i=>selected.has(i.id));
+      const selInc=selItems.filter(i=>i._txType==='income').reduce((s,i)=>s+(parseFloat(i.amount)||0),0);
+      const selExp=selItems.filter(i=>i._txType==='expense').reduce((s,i)=>s+(parseFloat(i.amount)||0),0);
+      const sumBar=document.createElement('div'); sumBar.style.cssText='display:flex;gap:12px;padding:10px 12px;background:var(--teal-bg);border-radius:var(--radius-sm);margin-bottom:10px;font-size:12px;';
+      sumBar.innerHTML=`<span style="color:var(--muted);">${selected.size} selected</span><span style="color:var(--teal-d);font-weight:600;">Income: AED ${selInc.toFixed(2)}</span><span style="color:var(--red);font-weight:600;">Expenses: AED ${selExp.toFixed(2)}</span>`;
+      m.appendChild(sumBar);
+    }
   }
 
-  makeSection('Income Sources', incItems, 'income');
-  makeSection('Expenses', expItems, 'expense');
-
-  if(!incItems.length && !expItems.length){
-    const emp=document.createElement('div'); emp.style.cssText='text-align:center;padding:2rem;color:var(--muted);font-size:13px;';
-    emp.innerHTML=`<div style="font-size:28px;margin-bottom:8px;opacity:0.3">📋</div>No budget entries for ${MONTHS_N[bm]} ${by}.<br><small style="color:var(--hint)">Add items in Monthly Budget or Dashboard first.</small>`;
-    m.appendChild(emp);
-  }
-
+  // ── Footer ──────────────────────────────────────────────────────────────
   const foot=document.createElement('div'); foot.className='modal-footer';
   const cancel=document.createElement('button'); cancel.className='btn btn-outline'; cancel.textContent='Cancel'; cancel.addEventListener('click',()=>{appState.modal=null;render();});
-  // Manual entry button
-  const manual=document.createElement('button'); manual.className='btn btn-outline'; manual.textContent='Manual Entry';
-  manual.addEventListener('click',()=>openBKTxModal(null));
-  foot.appendChild(manual); foot.appendChild(cancel); m.appendChild(foot);
+  const manual=document.createElement('button'); manual.className='btn btn-outline'; manual.textContent='Manual Entry'; manual.addEventListener('click',()=>openBKTxModal(null));
+
+  const postBtn=document.createElement('button'); postBtn.className='btn btn-primary';
+  postBtn.textContent=selected.size>0?`Post ${selected.size} Item${selected.size>1?'s':''}  →`:'Select Items to Post';
+  postBtn.disabled=selected.size===0;
+  if(selected.size===0) postBtn.style.opacity='0.55';
+
+  postBtn.addEventListener('click',()=>{
+    if(!selected.size) return;
+    const bm=appState.budgetMonth, by=appState.budgetYear;
+    const mbItems2=(appState.monthlyBudget||[]).filter(i=>i.month===bm&&i.year===by);
+    const dashInc2=(appState.dashIncome||[]).filter(i=>i.month===bm&&i.year===by);
+    const dashExp2=(appState.dashExpense||[]).filter(i=>i.month===bm&&i.year===by);
+    const allItems2=[
+      ...mbItems2.filter(i=>i.type==='income').map(i=>({...i,_txType:'income'})),
+      ...mbItems2.filter(i=>i.type==='expense').map(i=>({...i,_txType:'expense'})),
+      ...dashInc2.map(i=>({...i,_txType:'income'})),
+      ...dashExp2.map(i=>({...i,_txType:'expense'})),
+    ];
+    const toPost=allItems2.filter(i=>selected.has(i.id));
+    let posted=0;
+    toPost.forEach(item=>{
+      const label=item.label||item.name||item.category||'Entry';
+      const amt=parseFloat(item.amount||0);
+      const cur=item.currency||'AED';
+      const txType=item._txType;
+      const alreadyLogged=(appState.bookkeeping.transactions||[]).some(t=>t.srcLabel===label&&t.txType===txType);
+      if(alreadyLogged) return;
+      const accId=txType==='income'
+        ?(appState.bookkeeping.accounts.find(a=>a.id==='bk_rev')||appState.bookkeeping.accounts[0])?.id||''
+        :(appState.bookkeeping.accounts.find(a=>a.id==='bk_op')||appState.bookkeeping.accounts[0])?.id||'';
+      if(!appState.bookkeeping.transactions) appState.bookkeeping.transactions=[];
+      appState.bookkeeping.transactions.push({
+        id:'bktx_'+Date.now()+'_'+posted,
+        date:new Date().toISOString().slice(0,10),
+        ref:generateBKRef(txType,label),
+        description:label, txType, accountId:accId,
+        amount:amt, currency:cur, notes:'',
+        srcLabel:label, srcId:item.id,
+        postedAt:new Date().toISOString()
+      });
+      posted++;
+    });
+    saveLocal();
+    selected.clear();
+    toast(`✓ ${posted} item${posted>1?'s':''} posted to Bookkeeping`);
+    appState.modal=null;
+    render();
+  });
+
+  foot.appendChild(manual); foot.appendChild(cancel); foot.appendChild(postBtn);
+  m.appendChild(foot);
 }
+
 
 function buildBKTxModal(m){
   const d=appState.modal.data; const isEdit=!!appState.bookkeeping.transactions.find(t=>t.id===d.id);
