@@ -4554,8 +4554,11 @@ function buildMBRow(item, enbdRate, fmtMB){
   const row=document.createElement('div'); row.className='mb-row';
   const sym=item.currency==='PHP'?'₱':item.currency==='USD'?'$':'AED ';
   const phpConv=(item.currency==='AED'&&(item.isPHAllowance||item.showPHP))?' ≈ ₱'+(parseFloat(item.amount||0)*enbdRate).toLocaleString('en-US',{minimumFractionDigits:2}):'';
+  // Check if auto-logged to daily tap
+  const hasTap=item.type==='income'&&(appState.dailyTap||[]).some(t=>t.srcId==='mbinc_'+item.id);
+  const tapBadge=hasTap?'<span style="font-size:9px;background:var(--teal-bg);color:var(--teal-d);padding:1px 6px;border-radius:4px;margin-left:4px;vertical-align:middle;">→ TAP</span>':'';
   row.innerHTML=`
-    <div class="mb-row-label">${item.label||item.category||'—'}</div>
+    <div class="mb-row-label">${item.label||item.category||'—'}${tapBadge}</div>
     <span class="mb-row-cat">${item.category||'Other'}</span>
     ${item.isPHAllowance?'<span class="mb-ph-badge">🇵🇭 PH Allowance</span>':''}
     <div style="text-align:right;min-width:110px;">
@@ -4858,7 +4861,65 @@ function buildMBItemModal(m){
     if(!d.label) d.label=d.source||d.category;
     const idx=appState.monthlyBudget.findIndex(i=>i.id===d.id);
     if(idx>-1) appState.monthlyBudget[idx]={...d}; else appState.monthlyBudget.push({...d});
-    saveLocal(); appState.modal=null; toast(isEdit?'Updated!':'Added!'); render();
+
+    // ── Auto-log income to Daily Tap + update bank balance ──────────────────
+    if(!isExpense){
+      if(!appState.dailyTap) appState.dailyTap=[];
+      // Find destination bank: USD→PayPal, AED→ENBD Savings, PHP→GCash/UB
+      let destBank=null;
+      const cur=d.currency||'AED';
+      if(cur==='USD'){
+        destBank=(appState.banks||[]).find(b=>b.name.toLowerCase().includes('paypal'));
+      } else if(cur==='AED'){
+        destBank=(appState.banks||[]).find(b=>b.name.toLowerCase().includes('enbd')&&b.type==='Savings');
+        if(!destBank) destBank=(appState.banks||[]).find(b=>b.currency==='AED'&&b.type==='Savings');
+      } else if(cur==='PHP'){
+        destBank=(appState.banks||[]).find(b=>b.currency==='PHP'&&b.type==='Savings');
+      }
+      // Also honour explicitly set destinationBank id
+      if(d.destinationBank&&d.destinationBank.length>6){
+        const explicit=(appState.banks||[]).find(b=>b.id===d.destinationBank);
+        if(explicit) destBank=explicit;
+      }
+      // Check if tap already exists for this MB entry
+      const tapSrcId='mbinc_'+d.id;
+      const existingTap=(appState.dailyTap).find(t=>t.srcId===tapSrcId);
+      const mn=String((d.month||0)+1).padStart(2,'0');
+      const tapDate=`${d.year||new Date().getFullYear()}-${mn}-01`;
+      const tapEntry={
+        id: existingTap?existingTap.id:'tap_mbinc_'+d.id,
+        srcId: tapSrcId,
+        bankId: destBank?destBank.id:'',
+        date: tapDate,
+        description: (d.label||d.source||d.category)+' (Income)',
+        tapType: 'in',
+        amount: parseFloat(d.amount)||0,
+        currency: cur,
+        notes: `Auto-logged from Monthly Budget Income · ${destBank?destBank.name:'No bank linked'}`,
+        autoLogged: true,
+      };
+      if(existingTap){
+        const ti=(appState.dailyTap).findIndex(t=>t.srcId===tapSrcId);
+        appState.dailyTap[ti]={...tapEntry};
+      } else {
+        appState.dailyTap.push(tapEntry);
+      }
+      // Update bank balance (Tap In increases savings balance)
+      if(destBank){
+        const bi=appState.banks.findIndex(b=>b.id===destBank.id);
+        if(bi>-1&&appState.banks[bi].type!=='Credit Card'){
+          // balance is adjusted via tap records (getBankBalance reads taps)
+          // just show confirmation
+        }
+        toast(`✓ Income saved · Tap IN logged to ${destBank.name}`);
+      } else {
+        toast('Income saved · No matching bank found — tap logged without bank');
+      }
+    } else {
+      toast(isEdit?'Updated!':'Added!');
+    }
+
+    saveLocal(); appState.modal=null; render();
   });
   if(isEdit){
     const del=document.createElement('button'); del.className='btn btn-danger'; del.textContent='Delete';
@@ -4943,11 +5004,12 @@ function buildDailyTapPage(){
     filtered.forEach(tap=>{
       const bank=(appState.banks||[]).find(b=>b.id===tap.bankId);
       const sym=(bank?.currency||tap.currency||'AED')==='PHP'?'₱':'AED ';
+      const autoTag=tap.autoLogged?'<span style="font-size:9px;background:var(--teal-bg);color:var(--teal-d);padding:1px 5px;border-radius:4px;margin-left:4px;">AUTO</span>':'';
       const tr=document.createElement('tr');
       tr.innerHTML=`
         <td style="white-space:nowrap">${budgetFmtDate(tap.date)}</td>
         <td>${bank?`<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:8px;height:8px;border-radius:50%;background:${bank.color||'#1D9E75'};display:inline-block;"></span>${bank.name}</span>`:'—'}</td>
-        <td style="font-weight:500">${tap.description||'—'}</td>
+        <td style="font-weight:500">${tap.description||'—'}${autoTag}</td>
         <td><span class="${tap.tapType==='in'?'dt-type-in':'dt-type-out'}">${tap.tapType==='in'?'▲ IN':'▼ OUT'}</span></td>
         <td style="text-align:right;font-weight:600;color:${tap.tapType==='in'?'var(--teal)':'var(--red)'}">${sym}${parseFloat(tap.amount||0).toLocaleString('en-US',{minimumFractionDigits:2})}</td>
         <td style="color:var(--muted);font-size:12px">${tap.notes||'—'}</td>
