@@ -4869,7 +4869,40 @@ function buildMBItemModal(m){
         cvRow.appendChild(fg('Coverage To (date)','date',d.coverageTo||selBank2.cutoffDay?'':'',v=>d.coverageTo=v));
         m.appendChild(cvRow);
         if(!d.notes) d.notes=`${selBank2.name} CC Statement${d.coverageFrom?` (${d.coverageFrom} – ${d.coverageTo||''})`:''} `;
+        // Auto-set source bank to this CC
+        if(!d.sourceBankId) d.sourceBankId=selBank2.id;
       }
+    }
+
+    // ── Deduct from bank selector (shown for all expenses) ──────────────────
+    if((appState.banks||[]).length>0){
+      const bkDeductG=document.createElement('div'); bkDeductG.className='form-group';
+      bkDeductG.innerHTML='<label class="form-label">Deduct from Bank <span style="color:var(--hint);font-weight:400;font-size:11px;">which account pays for this?</span></label>';
+      const bkDeductSel=document.createElement('select'); bkDeductSel.className='form-select';
+      const noBank=document.createElement('option'); noBank.value=''; noBank.textContent='— No bank / cash —'; bkDeductSel.appendChild(noBank);
+      (appState.banks||[]).forEach(bank=>{
+        const o=document.createElement('option'); o.value=bank.id;
+        const avail=getBankBalance(bank);
+        const sym=bank.currency==='PHP'?'₱':'AED ';
+        const isCC=bank.type==='Credit Card';
+        o.textContent=`${bank.name}${bank.accountNo?' ●'+bank.accountNo.slice(-4):''} — ${isCC?'Avail: ':'Bal: '}${sym}${avail.toLocaleString('en-US',{minimumFractionDigits:2})}`;
+        if(d.sourceBankId===bank.id) o.selected=true;
+        bkDeductSel.appendChild(o);
+      });
+      bkDeductSel.addEventListener('change',e=>{ d.sourceBankId=e.target.value; buildMBItemModal(m); });
+      bkDeductG.appendChild(bkDeductSel);
+      // Show live balance impact if bank selected and amount entered
+      if(d.sourceBankId && d.amount){
+        const sb=(appState.banks||[]).find(b=>b.id===d.sourceBankId);
+        if(sb){
+          const curBal=getBankBalance(sb); const expAmt=parseFloat(d.amount||0);
+          const newBal=curBal-expAmt; const sym=sb.currency==='PHP'?'₱':'AED ';
+          const impDiv=document.createElement('div'); impDiv.style.cssText='font-size:12px;margin-top:6px;padding:7px 10px;border-radius:var(--radius-sm);background:'+(newBal<0?'var(--red-bg)':'var(--teal-bg)')+';';
+          impDiv.innerHTML=`After expense: <strong style="color:${newBal<0?'var(--red)':'var(--teal-d)'};">${sym}${newBal.toLocaleString('en-US',{minimumFractionDigits:2})}</strong> ${sb.type==='Credit Card'?'available':'balance'}${newBal<0?' ⚠ Over limit':''}`;
+          bkDeductG.appendChild(impDiv);
+        }
+      }
+      m.appendChild(bkDeductG);
     }
 
   // ── INCOME: hierarchical category ─────────────────────────────────────────
@@ -5156,7 +5189,53 @@ function buildMBItemModal(m){
         toast('Income saved · No matching bank found — tap logged without bank');
       }
     } else {
-      // If this is a debt payment, update the linked debt record
+      // ── Auto-log expense to Daily Tap (TAP OUT) ────────────────────────────
+      if(!appState.dailyTap) appState.dailyTap=[];
+      const expCur=d.currency||'AED';
+      const mn2=String((d.month||0)+1).padStart(2,'0');
+      const tapDate2=`${d.year||new Date().getFullYear()}-${mn2}-01`;
+      const tapSrcId2='mbexp_'+d.id;
+      const existingExpTap=appState.dailyTap.find(t=>t.srcId===tapSrcId2);
+
+      // Determine source bank:
+      // 1. Explicitly selected via d.sourceBankId
+      // 2. Category name matches a bank name (CC bank)
+      // 3. PH Allowance → PHP savings bank
+      // 4. AED expense → AED savings/checking
+      let srcBank=null;
+      if(d.sourceBankId){
+        srcBank=(appState.banks||[]).find(b=>b.id===d.sourceBankId);
+      }
+      if(!srcBank){
+        srcBank=(appState.banks||[]).find(b=>b.name===d.category);
+      }
+      if(!srcBank && (d.isPHAllowance || (d.currency||'AED')==='PHP')){
+        srcBank=(appState.banks||[]).find(b=>b.currency==='PHP');
+      }
+      if(!srcBank && expCur==='AED'){
+        srcBank=(appState.banks||[]).find(b=>b.currency==='AED'&&(b.type==='Savings'||b.type==='Checking'));
+      }
+
+      const tapExpEntry={
+        id: existingExpTap?existingExpTap.id:'tap_mbexp_'+d.id,
+        srcId: tapSrcId2,
+        bankId: srcBank?srcBank.id:'',
+        date: tapDate2,
+        description: (d.label||d.category||'Expense'),
+        tapType: 'out',
+        amount: parseFloat(d.amount)||0,
+        currency: expCur,
+        notes: `Auto-logged from Monthly Budget · ${srcBank?srcBank.name:'No bank linked'}`,
+        autoLogged: true,
+      };
+      if(existingExpTap){
+        const ti=appState.dailyTap.findIndex(t=>t.srcId===tapSrcId2);
+        appState.dailyTap[ti]={...tapExpEntry};
+      } else {
+        appState.dailyTap.push(tapExpEntry);
+      }
+
+      // If this is a debt payment, also update the linked debt record
       if(d.expType==='debt_payment' && d.debtId){
         const debt=(appState.manualDebts||[]).find(db=>db.id===d.debtId);
         if(debt && !isEdit){
@@ -5165,18 +5244,18 @@ function buildMBItemModal(m){
           debt.paidAmount=Math.min(prevPaid+payAmt, parseFloat(debt.totalAmount||0));
           if(debt.paidAmount>=parseFloat(debt.totalAmount||0)){
             debt.status='settled';
-            toast('✓ Debt payment saved · '+debt.ctrlNo+' fully settled!');
+            toast(`✓ Debt payment saved · ${debt.ctrlNo} fully settled! · Tap OUT → ${srcBank?srcBank.name:'No bank'}`);
           } else {
             debt.status='partial';
             const remaining=parseFloat(debt.totalAmount||0)-debt.paidAmount;
             const sym=debt.currency==='PHP'?'₱':debt.currency==='USD'?'$':'AED ';
-            toast('✓ Payment recorded · '+sym+remaining.toLocaleString('en-US',{minimumFractionDigits:2})+' still remaining');
+            toast(`✓ Payment recorded · ${sym}${remaining.toLocaleString('en-US',{minimumFractionDigits:2})} remaining · Tap OUT → ${srcBank?srcBank.name:'No bank'}`);
           }
         } else {
-          toast(isEdit?'Payment updated!':'Debt payment added!');
+          toast(isEdit?`Payment updated · Tap OUT → ${srcBank?srcBank.name:'No bank'}`:`Debt payment added · Tap OUT → ${srcBank?srcBank.name:'No bank'}`);
         }
       } else {
-        toast(isEdit?'Updated!':'Added!');
+        toast(isEdit?`Expense updated · Tap OUT → ${srcBank?srcBank.name:'No bank'}`:`Expense saved · Tap OUT → ${srcBank?srcBank.name:'No bank'}`);
       }
     }
 
