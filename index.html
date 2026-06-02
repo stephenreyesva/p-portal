@@ -727,7 +727,18 @@ function loadLocal(){
     if(d.monthlyBudget) appState.monthlyBudget=d.monthlyBudget;
     if(d.customCategories) appState.customCategories=d.customCategories;
     if(d.dailyTap) appState.dailyTap=d.dailyTap;
-    if(d.bookkeeping) appState.bookkeeping=Object.assign({transactions:[],accounts:[]},d.bookkeeping);
+    if(d.bookkeeping){
+      appState.bookkeeping=Object.assign({transactions:[],accounts:[]},d.bookkeeping);
+      // Remove legacy auto-posted transactions on every load
+      if(appState.bookkeeping.transactions){
+        appState.bookkeeping.transactions=appState.bookkeeping.transactions.filter(t=>
+          t.ref!=='AUTO' && t.ref!=='MB' && t.ref!=='TAP' &&
+          t.source!=='monthly_budget' && t.source!=='daily_tap' &&
+          !(t.notes||'').includes('Auto-synced') &&
+          !(t.notes||'').includes('Auto-imported')
+        );
+      }
+    }
     if(d.dashIncome) appState.dashIncome=d.dashIncome;
     if(d.dashExpense) appState.dashExpense=d.dashExpense;
     if(d.phGroups) appState.phGroups=d.phGroups;
@@ -2313,7 +2324,7 @@ function buildModal(){
     m.style.maxWidth='500px'; buildBKTxModal(m); ov.appendChild(m); return ov;
   }
   if(appState.modal.type==='bk_import'){
-    m.style.maxWidth='500px'; buildBKImportModal(m); ov.appendChild(m); return ov;
+    m.style.maxWidth='660px'; buildBKImportModal(m); ov.appendChild(m); return ov;
   }
   if(appState.modal.type==='bk_acc'){
     m.style.maxWidth='400px'; buildBKAccModal(m); ov.appendChild(m); return ov;
@@ -3289,24 +3300,7 @@ function buildExpRow(e, bm, by){
   return row;
 }
 
-// ── AUTO-SYNC DASHBOARD → BOOKKEEPING ────────────────────────────────────────
-function syncDashToBookkeeping(itemId, type){
-  ensureDefaultBKAccounts();
-  const bk = appState.bookkeeping;
-  if(type==='income'){
-    const item = appState.dashIncome.find(i=>i.id===itemId); if(!item||item.status!=='done') return;
-    const existing = bk.transactions.find(t=>t.srcId===itemId);
-    if(existing){ existing.amount=item.amount; existing.description=item.name; return; }
-    const revAcc = bk.accounts.find(a=>a.id==='bk_rev')||bk.accounts[0];
-    bk.transactions.push({id:'bktx_'+Date.now()+'_'+Math.random().toString(36).slice(2),date:new Date().toISOString().slice(0,10),ref:'AUTO',description:item.name,txType:'income',accountId:revAcc?.id||'',amount:item.amount,notes:'Auto-synced from Dashboard',srcId:itemId});
-  } else {
-    const item = appState.dashExpense.find(i=>i.id===itemId); if(!item||item.status!=='done') return;
-    const existing = bk.transactions.find(t=>t.srcId===itemId);
-    if(existing){ existing.amount=item.amount; existing.description=item.name; return; }
-    const expAcc = bk.accounts.find(a=>a.id==='bk_op')||bk.accounts[0];
-    bk.transactions.push({id:'bktx_'+Date.now()+'_'+Math.random().toString(36).slice(2),date:new Date().toISOString().slice(0,10),ref:'AUTO',description:item.name,txType:'expense',accountId:expAcc?.id||'',amount:item.amount,notes:'Auto-synced from Dashboard',srcId:itemId});
-  }
-}
+// syncDashToBookkeeping REMOVED — all posting is manual via table picker
 
 // ── DASHBOARD MODALS ──────────────────────────────────────────────────────────
 function openDashIncomeModal(item, bm, by){
@@ -3963,10 +3957,9 @@ function buildMemberBudgetEntryModal(m){
   const enbdRate=getEnbdRate();
   m.innerHTML=`<div class="modal-title">${isEdit?'Edit':'Add'} Budget for ${memberLabel}</div>`;
 
-  // Note about auto-sync
   const note=document.createElement('div');
   note.style.cssText='font-size:11px;color:var(--teal-d);background:var(--teal-bg);padding:6px 10px;border-radius:var(--radius-sm);margin-bottom:12px;';
-  note.textContent='✓ This entry will be saved directly to Monthly Budget';
+  note.textContent='✓ Saved to Monthly Budget — post to Bookkeeping manually via New Transaction';
   m.appendChild(note);
 
   // Label
@@ -4360,13 +4353,6 @@ function buildManualDebtModal(m){
     if(!appState.manualDebts) appState.manualDebts=[];
     const idx=appState.manualDebts.findIndex(x=>x.id===d.id);
     if(idx>-1) appState.manualDebts[idx]={...d}; else appState.manualDebts.push({...d});
-    // Auto-sync to bookkeeping
-    ensureDefaultBKAccounts();
-    const existBk=(appState.bookkeeping.transactions||[]).find(t=>t.srcId===d.id);
-    if(!existBk){
-      const payAcc=(appState.bookkeeping.accounts||[]).find(a=>a.id==='bk_pay')||(appState.bookkeeping.accounts||[])[0];
-      appState.bookkeeping.transactions.push({id:'bktx_debt_'+d.id,date:d.createdAt||new Date().toISOString().slice(0,10),ref:d.ctrlNo,description:'Debt: '+d.person+(d.description?' — '+d.description:''),txType:'expense',accountId:payAcc?.id||'',amount:d.totalAmount,notes:'Auto-synced from Debt record '+d.ctrlNo,srcId:d.id});
-    }
     saveLocal(); appState.modal=null; toast(isEdit?'Debt updated!':'Debt record added — '+d.ctrlNo+'!'); render();
   });
   if(isEdit){ const del=document.createElement('button'); del.className='btn btn-danger'; del.textContent='Delete'; del.addEventListener('click',()=>{ if(!confirm('Delete debt record '+d.ctrlNo+'?')) return; appState.manualDebts=appState.manualDebts.filter(x=>x.id!==d.id); saveLocal(); appState.modal=null; toast('Debt deleted'); render(); }); foot.appendChild(del); }
@@ -4798,27 +4784,92 @@ function buildMBItemModal(m){
 
   // ── EXPENSE: simple category dropdown ─────────────────────────────────────
   if(isExpense){
-    const labG=document.createElement('div'); labG.className='form-group'; labG.innerHTML='<label class="form-label">Category / Label</label>';
-    const labSel=document.createElement('select'); labSel.className='form-select';
-    MB_EXPENSE_PRESETS.forEach(c=>{ const o=document.createElement('option'); o.value=c; o.textContent=c; if(c===cat)o.selected=true; labSel.appendChild(o); });
-    const addNew=document.createElement('option'); addNew.value='__new__'; addNew.textContent='+ Add new category...'; labSel.appendChild(addNew);
-    labSel.addEventListener('change',e=>{
-      if(e.target.value==='__new__'){
-        const v=prompt('New category name:'); if(v){ d.category=v; d.label=v; buildMBItemModal(m); } else labSel.value=d.category;
-      } else { d.category=e.target.value; d.label=e.target.value; buildMBItemModal(m); }
+
+    // ── Expense type toggle: Regular or Debt Payment ────────────────────────
+    const expTypeG=document.createElement('div'); expTypeG.className='form-group';
+    expTypeG.innerHTML='<label class="form-label">Expense Type</label>';
+    const expTypeRow=document.createElement('div'); expTypeRow.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px;';
+    [{val:'regular',icon:'🧾',hint:'Bills, groceries, utilities…'},{val:'debt_payment',icon:'💳',hint:'Pay off a debt this month'}].forEach(({val,icon,hint})=>{
+      const isA=(d.expType||'regular')===val;
+      const btn=document.createElement('button'); btn.type='button';
+      btn.style.cssText=`padding:10px 12px;border-radius:var(--radius-sm);border:2px solid ${isA?'var(--teal)':'var(--border)'};background:${isA?'var(--teal-bg)':'var(--white)'};cursor:pointer;text-align:left;font-family:inherit;transition:all .12s;`;
+      btn.innerHTML=`<div style="font-size:13px;font-weight:600;color:${isA?'var(--teal)':'var(--text)'}">${icon} ${val==='regular'?'Regular Expense':'Debt Payment'}</div><div style="font-size:11px;color:var(--muted);margin-top:2px">${hint}</div>`;
+      btn.addEventListener('click',()=>{ d.expType=val; d.debtId=''; d.category=''; d.label=''; d.amount=''; d.notes=''; buildMBItemModal(m); });
+      expTypeRow.appendChild(btn);
     });
-    labG.appendChild(labSel); m.appendChild(labG);
-    // If selected category matches a CC bank, show coverage dates
-    const selBank2=(appState.banks||[]).find(b=>b.name===d.category&&b.type==='Credit Card');
-    if(selBank2){
-      const ccTip=document.createElement('div'); ccTip.style.cssText='font-size:11px;color:var(--blue);background:var(--blue-bg);padding:6px 10px;border-radius:var(--radius-sm);margin-bottom:8px;';
-      ccTip.innerHTML=`💳 Credit Card payment — <strong>${selBank2.name}</strong>. Set statement coverage dates below.`;
-      m.appendChild(ccTip);
-      const cvRow=document.createElement('div'); cvRow.className='form-row';
-      cvRow.appendChild(fg('Coverage From (date)','date',d.coverageFrom||'','',v=>d.coverageFrom=v));
-      cvRow.appendChild(fg('Coverage To (date)','date',d.coverageTo||selBank2.cutoffDay?'':'',v=>d.coverageTo=v));
-      m.appendChild(cvRow);
-      if(!d.notes) d.notes=`${selBank2.name} CC Statement${d.coverageFrom?` (${d.coverageFrom} – ${d.coverageTo||''})`:''} `;
+    expTypeG.appendChild(expTypeRow); m.appendChild(expTypeG);
+
+    // ── DEBT PAYMENT: pick from debt records ────────────────────────────────
+    if((d.expType||'regular')==='debt_payment'){
+      const activeDebts=(appState.manualDebts||[]).filter(db=>db.status!=='settled');
+      const debtG=document.createElement('div'); debtG.className='form-group';
+      debtG.innerHTML='<label class="form-label">Select Debt to Pay <span style="color:var(--hint);font-weight:400;font-size:11px;">tap to auto-fill amount</span></label>';
+
+      if(!activeDebts.length){
+        const noDbt=document.createElement('div'); noDbt.style.cssText='font-size:12px;color:var(--hint);padding:8px;background:var(--bg);border-radius:var(--radius-sm);';
+        noDbt.textContent='No active debts found. Add a debt first in the Debts section.';
+        debtG.appendChild(noDbt);
+      } else {
+        activeDebts.forEach(debt=>{
+          const remaining=parseFloat(debt.totalAmount||0)-parseFloat(debt.paidAmount||0);
+          const sym=debt.currency==='PHP'?'₱':debt.currency==='USD'?'$':'AED ';
+          const isSelected=d.debtId===debt.id;
+          const pct=debt.totalAmount>0?Math.min(100,(parseFloat(debt.paidAmount||0)/parseFloat(debt.totalAmount))*100).toFixed(0):0;
+          const dc=document.createElement('div');
+          dc.style.cssText=`border:2px solid ${isSelected?'var(--teal)':'var(--border)'};border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:6px;cursor:pointer;background:${isSelected?'var(--teal-bg)':'var(--white)'};transition:all .12s;`;
+          dc.innerHTML=`
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <div style="font-weight:600;font-size:13px;color:${isSelected?'var(--teal)':'var(--text)'};">${debt.person||'Unknown'}${debt.description?' — <span style="font-weight:400;color:var(--muted);">'+debt.description+'</span>':''}</div>
+              <div style="font-size:12px;font-weight:700;color:var(--red);">${sym}${remaining.toLocaleString('en-US',{minimumFractionDigits:2})} left</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+              <div style="flex:1;height:5px;background:var(--border);border-radius:3px;"><div style="width:${pct}%;height:100%;background:var(--teal);border-radius:3px;"></div></div>
+              <span style="font-size:10px;color:var(--hint);">${pct}% paid · ${debt.ctrlNo}</span>
+            </div>`;
+          dc.addEventListener('click',()=>{
+            d.debtId=debt.id;
+            d.category='Debt Payment';
+            d.label='Payment — '+debt.person+(debt.description?' ('+debt.description+')':'');
+            d.amount=remaining; // auto-fill full remaining amount
+            d.currency=debt.currency||'AED';
+            d.notes='Debt payment for '+debt.ctrlNo+(debt.person?' · '+debt.person:'');
+            buildMBItemModal(m);
+          });
+          debtG.appendChild(dc);
+        });
+        // Payment amount tip
+        if(d.debtId){
+          const payTip=document.createElement('div'); payTip.style.cssText='font-size:11px;color:var(--amber);background:var(--amber-bg);padding:6px 10px;border-radius:var(--radius-sm);margin-top:4px;';
+          payTip.innerHTML='💡 Amount auto-filled with full remaining balance. Change it below if paying partially.';
+          debtG.appendChild(payTip);
+        }
+      }
+      m.appendChild(debtG);
+
+    } else {
+      // ── REGULAR EXPENSE: category dropdown ──────────────────────────────
+      const labG=document.createElement('div'); labG.className='form-group'; labG.innerHTML='<label class="form-label">Category / Label</label>';
+      const labSel=document.createElement('select'); labSel.className='form-select';
+      MB_EXPENSE_PRESETS.forEach(c=>{ const o=document.createElement('option'); o.value=c; o.textContent=c; if(c===cat)o.selected=true; labSel.appendChild(o); });
+      const addNew=document.createElement('option'); addNew.value='__new__'; addNew.textContent='+ Add new category...'; labSel.appendChild(addNew);
+      labSel.addEventListener('change',e=>{
+        if(e.target.value==='__new__'){
+          const v=prompt('New category name:'); if(v){ d.category=v; d.label=v; buildMBItemModal(m); } else labSel.value=d.category;
+        } else { d.category=e.target.value; d.label=e.target.value; buildMBItemModal(m); }
+      });
+      labG.appendChild(labSel); m.appendChild(labG);
+      // If selected category matches a CC bank, show coverage dates
+      const selBank2=(appState.banks||[]).find(b=>b.name===d.category&&b.type==='Credit Card');
+      if(selBank2){
+        const ccTip=document.createElement('div'); ccTip.style.cssText='font-size:11px;color:var(--blue);background:var(--blue-bg);padding:6px 10px;border-radius:var(--radius-sm);margin-bottom:8px;';
+        ccTip.innerHTML=`💳 Credit Card payment — <strong>${selBank2.name}</strong>. Set statement coverage dates below.`;
+        m.appendChild(ccTip);
+        const cvRow=document.createElement('div'); cvRow.className='form-row';
+        cvRow.appendChild(fg('Coverage From (date)','date',d.coverageFrom||'','',v=>d.coverageFrom=v));
+        cvRow.appendChild(fg('Coverage To (date)','date',d.coverageTo||selBank2.cutoffDay?'':'',v=>d.coverageTo=v));
+        m.appendChild(cvRow);
+        if(!d.notes) d.notes=`${selBank2.name} CC Statement${d.coverageFrom?` (${d.coverageFrom} – ${d.coverageTo||''})`:''} `;
+      }
     }
 
   // ── INCOME: hierarchical category ─────────────────────────────────────────
@@ -5105,7 +5156,28 @@ function buildMBItemModal(m){
         toast('Income saved · No matching bank found — tap logged without bank');
       }
     } else {
-      toast(isEdit?'Updated!':'Added!');
+      // If this is a debt payment, update the linked debt record
+      if(d.expType==='debt_payment' && d.debtId){
+        const debt=(appState.manualDebts||[]).find(db=>db.id===d.debtId);
+        if(debt && !isEdit){
+          const prevPaid=parseFloat(debt.paidAmount||0);
+          const payAmt=parseFloat(d.amount||0);
+          debt.paidAmount=Math.min(prevPaid+payAmt, parseFloat(debt.totalAmount||0));
+          if(debt.paidAmount>=parseFloat(debt.totalAmount||0)){
+            debt.status='settled';
+            toast('✓ Debt payment saved · '+debt.ctrlNo+' fully settled!');
+          } else {
+            debt.status='partial';
+            const remaining=parseFloat(debt.totalAmount||0)-debt.paidAmount;
+            const sym=debt.currency==='PHP'?'₱':debt.currency==='USD'?'$':'AED ';
+            toast('✓ Payment recorded · '+sym+remaining.toLocaleString('en-US',{minimumFractionDigits:2})+' still remaining');
+          }
+        } else {
+          toast(isEdit?'Payment updated!':'Debt payment added!');
+        }
+      } else {
+        toast(isEdit?'Updated!':'Added!');
+      }
     }
 
     saveLocal(); appState.modal=null; render();
@@ -5340,56 +5412,7 @@ function ensureDefaultBKAccounts(){
     appState.bookkeeping.accounts=[...DEFAULT_BK_ACCOUNTS]; saveLocal();
   }
 }
-function syncAllToBookkeeping(){
-  // Pull every monthlyBudget entry and dailyTap entry into bookkeeping (if not already there)
-  ensureDefaultBKAccounts();
-  const bk=appState.bookkeeping;
-  const revAcc=bk.accounts.find(a=>a.id==='bk_rev')||bk.accounts[0];
-  const expAcc=bk.accounts.find(a=>a.id==='bk_op')||bk.accounts[0];
-  const cashAcc=bk.accounts.find(a=>a.id==='bk_cash')||bk.accounts[0];
-  let changed=false;
-
-  // Monthly Budget entries
-  (appState.monthlyBudget||[]).forEach(item=>{
-    const srcId='mb_'+item.id;
-    if(bk.transactions.find(t=>t.srcId===srcId)) return; // already synced
-    const mn=String((item.month||0)+1).padStart(2,'0');
-    const dateStr=`${item.year||new Date().getFullYear()}-${mn}-01`;
-    bk.transactions.push({
-      id:'bktx_mb_'+item.id, srcId, ref:'MB',
-      date:dateStr,
-      description:(item.label||item.category||'Budget entry'),
-      txType:item.type==='income'?'income':'expense',
-      accountId:item.type==='income'?(revAcc?.id||''):(expAcc?.id||''),
-      amount:parseFloat(item.amount||0),
-      currency:item.currency||'AED',
-      notes:'Auto-imported from Monthly Budget'+(item.isPHAllowance?' · PH Allowance':''),
-      source:'monthly_budget'
-    });
-    changed=true;
-  });
-
-  // Daily Tap entries
-  (appState.dailyTap||[]).forEach(tap=>{
-    const srcId='tap_'+tap.id;
-    if(bk.transactions.find(t=>t.srcId===srcId)) return;
-    const bank=(appState.banks||[]).find(b=>b.id===tap.bankId);
-    bk.transactions.push({
-      id:'bktx_tap_'+tap.id, srcId, ref:'TAP',
-      date:tap.date||new Date().toISOString().slice(0,10),
-      description:tap.description||'Daily Tap',
-      txType:tap.tapType==='in'?'income':'expense',
-      accountId:cashAcc?.id||'',
-      amount:parseFloat(tap.amount||0),
-      currency:tap.currency||bank?.currency||'AED',
-      notes:'Auto-imported from Daily Tap'+(bank?' · '+bank.name:''),
-      source:'daily_tap'
-    });
-    changed=true;
-  });
-
-  if(changed) saveLocal();
-}
+// syncAllToBookkeeping REMOVED — all posting is manual via table picker
 
 function fmtCurrency(amount, currency){
   const n=parseFloat(amount||0);
@@ -5505,10 +5528,11 @@ function buildBookkeepingPage(){
   hdr.innerHTML=`<div><div class="page-title">📒 Bookkeeping</div><div class="page-sub">Double-entry accounting</div></div>`;
   const addTxBtn=document.createElement('button'); addTxBtn.className='btn btn-primary';
   addTxBtn.innerHTML=`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> New Transaction`;
-  addTxBtn.addEventListener('click',()=>openBKTxModal(null));
+  addTxBtn.addEventListener('click',()=>openBKImportModal());
   // Manual import button — user-triggered only (avoids auto duplicates)
   const importBtn=document.createElement('button'); importBtn.className='btn btn-outline';
   importBtn.style.cssText='font-size:12px;gap:5px;';
+  importBtn.style.display='none'; // merged into New Transaction
   importBtn.innerHTML=`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="8 17 12 21 16 17"/><line x1="12" y1="3" x2="12" y2="21"/></svg> Import from Budget`;
   importBtn.title='Pick a budget item to log as a bookkeeping transaction';
   importBtn.addEventListener('click',()=>openBKImportModal());
@@ -5544,7 +5568,7 @@ function buildBookkeepingPage(){
     const rc=document.createElement('div'); rc.className='card'; rc.style.marginBottom='1rem';
     rc.innerHTML=`<div class="card-header"><span class="card-title">Recent Transactions</span></div>`;
     const recent=[...txs].sort((a,b)=>b.date>a.date?1:-1).slice(0,8);
-    if(!recent.length){ rc.innerHTML+=`<div class="empty"><div class="empty-icon">📋</div><p>No transactions logged yet.<br><small style="color:var(--hint)">Click <strong>New Transaction</strong> to manually log an entry, or <strong>Import from Budget</strong> to pick from your Monthly Budget items.</small></p></div>`; }
+    if(!recent.length){ rc.innerHTML+=`<div class="empty"><div class="empty-icon">📋</div><p>No transactions logged yet.<br><small style="color:var(--hint)">Click <strong>New Transaction</strong> to pick from your Monthly Budget items or add a manual entry.</small></p></div>`; }
     else{
       const tw=document.createElement('div'); tw.className='table-wrap';
       const tbl=document.createElement('table');
@@ -5676,29 +5700,50 @@ function buildBKImportModal(m){
   const mbItems=(appState.monthlyBudget||[]).filter(i=>i.month===bm&&i.year===by);
   const dashInc=(appState.dashIncome||[]).filter(i=>i.month===bm&&i.year===by);
   const dashExp=(appState.dashExpense||[]).filter(i=>i.month===bm&&i.year===by);
-
+  // Daily Tap items for the selected month
+  const tapItems=(appState.dailyTap||[]).filter(t=>{
+    if(!t.date) return false;
+    const d=new Date(t.date+'T00:00:00');
+    return d.getMonth()===bm && d.getFullYear()===by;
+  });
+  // Budget income/expense
   const incItems=[...mbItems.filter(i=>i.type==='income'), ...dashInc];
   const expItems=[...mbItems.filter(i=>i.type==='expense'), ...dashExp];
   const allItems=[
-    ...incItems.map(i=>({...i,_txType:'income'})),
-    ...expItems.map(i=>({...i,_txType:'expense'}))
+    ...incItems.map(i=>({...i,_txType:'income',_src:'monthly'})),
+    ...expItems.map(i=>({...i,_txType:'expense',_src:'monthly'})),
+    // Daily Tap: tap-in = income, tap-out = expense
+    ...tapItems.map(t=>({
+      ...t,
+      label:t.description||t.label||'Daily Tap',
+      category:(appState.banks||[]).find(b=>b.id===t.bankId)?.name||'Daily Tap',
+      amount:t.amount,
+      currency:t.currency||'AED',
+      _txType:t.tapType==='in'?'income':'expense',
+      _src:'daily_tap'
+    }))
   ];
 
   // Track which items user has selected (by item id)
   if(!m._selected) m._selected = new Set();
   const selected = m._selected;
 
-  m.innerHTML=`<div class="modal-title">Import from Budget — ${MONTHS_N[bm]} ${by}</div>`;
-  m.style.maxWidth='620px';
+  m.innerHTML=`<div class="modal-title">Post to Bookkeeping — ${MONTHS_N[bm]} ${by}</div>`;
+  m.style.maxWidth='660px';
 
   // Tip
-  const note=document.createElement('div'); note.style.cssText='font-size:12px;background:var(--blue-bg,#EFF6FF);border:1px solid #BFDBFE;border-radius:var(--radius-sm);padding:8px 12px;margin-bottom:14px;color:var(--blue);';
-  note.innerHTML='✓ Tick the items you want to post to Bookkeeping. Posted items are removed from this list.';
-  m.appendChild(note);
+  const note=document.createElement('div'); note.style.cssText='font-size:12px;background:var(--blue-bg,#EFF6FF);border:1px solid #BFDBFE;border-radius:var(--radius-sm);padding:8px 12px;margin-bottom:14px;color:var(--blue);display:flex;align-items:center;justify-content:space-between;gap:12px;';
+  const noteText=document.createElement('span'); noteText.innerHTML='✓ Tick the items to post. Posted items are removed from the list.';
+  const manualLink=document.createElement('button'); manualLink.className='btn btn-outline btn-sm'; manualLink.style.cssText='flex-shrink:0;font-size:11px;';
+  manualLink.textContent='+ Manual Entry'; manualLink.addEventListener('click',()=>openBKTxModal(null));
+  note.appendChild(noteText); note.appendChild(manualLink); m.appendChild(note);
 
   if(!allItems.length){
     const emp=document.createElement('div'); emp.style.cssText='text-align:center;padding:2.5rem;color:var(--muted);font-size:13px;';
-    emp.innerHTML=`<div style="font-size:28px;margin-bottom:8px;opacity:0.3">📋</div>No budget entries for ${MONTHS_N[bm]} ${by}.<br><small style="color:var(--hint)">Add items in Monthly Budget or Dashboard first.</small>`;
+    const empManualBtn=document.createElement('button'); empManualBtn.className='btn btn-primary'; empManualBtn.style.marginTop='12px'; empManualBtn.textContent='+ Manual Entry';
+    empManualBtn.addEventListener('click',()=>openBKTxModal(null));
+    emp.innerHTML=`<div style="font-size:28px;margin-bottom:8px;opacity:0.3">📋</div>No budget entries for ${MONTHS_N[bm]} ${by}.<br><small style="color:var(--hint)">Add items in Monthly Budget first, or use manual entry.</small><br>`;
+    emp.appendChild(empManualBtn);
     m.appendChild(emp);
   } else {
     // ── Table ──────────────────────────────────────────────────────────
@@ -5739,9 +5784,11 @@ function buildBKImportModal(m){
       const descTd=document.createElement('td'); descTd.style.cssText='padding:8px 10px;font-weight:500;';
       descTd.textContent=label; tr.appendChild(descTd);
 
-      // Category
+      // Category + source badge
       const catTd=document.createElement('td'); catTd.style.cssText='padding:8px 10px;';
-      catTd.innerHTML=`<span style="font-size:11px;background:var(--bg);border:1px solid var(--border);padding:2px 7px;border-radius:100px;color:var(--muted);">${item.category||'—'}</span>`;
+      const srcColor=item._src==='daily_tap'?'#7C3AED':item._src==='monthly'?'#1D4ED8':'#B45309';
+      const srcLabel=item._src==='daily_tap'?'Daily Tap':item._src==='monthly'?'Budget':'Dashboard';
+      catTd.innerHTML=`<span style="font-size:11px;background:var(--bg);border:1px solid var(--border);padding:2px 7px;border-radius:100px;color:var(--muted);">${item.category||'—'}</span> <span style="font-size:10px;padding:1px 6px;border-radius:100px;background:${srcColor}22;color:${srcColor};font-weight:600;">${srcLabel}</span>`;
       tr.appendChild(catTd);
 
       // Type badge
@@ -5798,12 +5845,10 @@ function buildBKImportModal(m){
   // ── Footer ──────────────────────────────────────────────────────────────
   const foot=document.createElement('div'); foot.className='modal-footer';
   const cancel=document.createElement('button'); cancel.className='btn btn-outline'; cancel.textContent='Cancel'; cancel.addEventListener('click',()=>{appState.modal=null;render();});
-  const manual=document.createElement('button'); manual.className='btn btn-outline'; manual.textContent='Manual Entry'; manual.addEventListener('click',()=>openBKTxModal(null));
-
   const postBtn=document.createElement('button'); postBtn.className='btn btn-primary';
-  postBtn.textContent=selected.size>0?`Post ${selected.size} Item${selected.size>1?'s':''}  →`:'Select Items to Post';
+  postBtn.textContent=selected.size>0?`✓ Post ${selected.size} Item${selected.size>1?'s':''}  →`:'Select Items to Post';
   postBtn.disabled=selected.size===0;
-  if(selected.size===0) postBtn.style.opacity='0.55';
+  if(selected.size===0) postBtn.style.cssText='opacity:0.55;cursor:not-allowed;';
 
   postBtn.addEventListener('click',()=>{
     if(!selected.size) return;
@@ -5848,7 +5893,7 @@ function buildBKImportModal(m){
     render();
   });
 
-  foot.appendChild(manual); foot.appendChild(cancel); foot.appendChild(postBtn);
+  foot.appendChild(cancel); foot.appendChild(postBtn);
   m.appendChild(foot);
 }
 
