@@ -578,6 +578,9 @@ let appState = {
   enbdRate: null,
   enbdRateTime: null,
   dtBankFilter: null,
+  summaryBankFilter: null,
+  summaryMonth: null,
+  summaryYear: null,
   bkTab: 'dashboard',
   budgetSubMenu: null,   // null = main dashboard, or family member id (Xyren/Ayesha/Seth/Mama/custom)
   familyMembers: [       // sub-menus under Budget Tracker in sidebar
@@ -711,7 +714,8 @@ function saveLocal(){
     banks:appState.banks,monthlyBudget:appState.monthlyBudget,customCategories:appState.customCategories,
     dailyTap:appState.dailyTap,bookkeeping:appState.bookkeeping,
     dashIncome:appState.dashIncome,dashExpense:appState.dashExpense,
-    phGroups:appState.phGroups,familyMembers:appState.familyMembers,manualDebts:appState.manualDebts
+    phGroups:appState.phGroups,familyMembers:appState.familyMembers,manualDebts:appState.manualDebts,
+    summaryMonth:appState.summaryMonth,summaryYear:appState.summaryYear
   }));
 }
 function loadLocal(){
@@ -744,6 +748,8 @@ function loadLocal(){
     if(d.phGroups) appState.phGroups=d.phGroups;
     if(d.familyMembers) appState.familyMembers=d.familyMembers;
     if(d.manualDebts) appState.manualDebts=d.manualDebts;
+    if(d.summaryMonth!==undefined&&d.summaryMonth!==null) appState.summaryMonth=d.summaryMonth;
+    if(d.summaryYear) appState.summaryYear=d.summaryYear;
   }catch(e){} }
   const legacy=localStorage.getItem('sr_tracker_v1');
   if(legacy){ try{ const ld=JSON.parse(legacy); const ac=appState.clients.find(c=>c.repo==='allriot'); if(ac){ if(!appState.clientData[ac.id])appState.clientData[ac.id]={entries:[],invoices:[]}; if((appState.clientData[ac.id].entries||[]).length===0){ if(ld.entries)appState.clientData[ac.id].entries=ld.entries; if(ld.invoices)appState.clientData[ac.id].invoices=ld.invoices; } } }catch(e){} }
@@ -2775,6 +2781,9 @@ function buildBudgetTracker(){
     contentArea.appendChild(otCard); budgetLayout.appendChild(contentArea); div.appendChild(budgetLayout); return div;
   }
 
+  // ── Dashboard → Summary page ─────────────────────────────────────
+  contentArea.appendChild(buildSummaryPage()); budgetLayout.appendChild(contentArea); div.appendChild(budgetLayout); return div;
+
   // ── Debt balance reminders (flashing) ────────────────────────────
   const activeManualDebts=(appState.manualDebts||[]).filter(d=>d.status!=='settled');
   if(activeManualDebts.length){
@@ -4284,7 +4293,7 @@ function buildManualDebtModal(m){
       const blankOpt=document.createElement('option'); blankOpt.value=''; blankOpt.textContent='— Select bank or card —'; bkSel.appendChild(blankOpt);
       allBanks.forEach(bank=>{
         const isCC=bank.type==='Credit Card';
-        const avail=getBankBalance(bank); const sym=bank.currency==='PHP'?'₱':'AED ';
+        const avail=getBankBalance(bank); const sym=bank.currency==='PHP'?'₱':bank.currency==='USD'?'$':'AED ';
         const o=document.createElement('option'); o.value=bank.id;
         o.textContent=`${bank.name}${bank.accountNo?' ●●●●'+bank.accountNo.slice(-4):''} — ${bank.type} · ${sym}${avail.toLocaleString('en-US',{minimumFractionDigits:2})}${isCC?' avail':''}`;
         if(bank.id===d.bankId) o.selected=true; bkSel.appendChild(o);
@@ -4419,7 +4428,7 @@ function buildBanksPage(){
     c.appendChild(accent);
     const tapCount=(appState.dailyTap||[]).filter(t=>t.bankId===bank.id).length;
     const isCC=bank.type==='Credit Card';
-    const currSym=bank.currency==='PHP'?'₱':'AED ';
+    const currSym=bank.currency==='PHP'?'₱':bank.currency==='USD'?'$':'AED ';
     const liveBalance=getBankBalance(bank);
     const usedAmt=getBankUsed(bank);
     const limitAmt=parseFloat(bank.creditLimit||bank.balance||0);
@@ -4883,7 +4892,7 @@ function buildMBItemModal(m){
       (appState.banks||[]).forEach(bank=>{
         const o=document.createElement('option'); o.value=bank.id;
         const avail=getBankBalance(bank);
-        const sym=bank.currency==='PHP'?'₱':'AED ';
+        const sym=bank.currency==='PHP'?'₱':bank.currency==='USD'?'$':'AED ';
         const isCC=bank.type==='Credit Card';
         o.textContent=`${bank.name}${bank.accountNo?' ●'+bank.accountNo.slice(-4):''} — ${isCC?'Avail: ':'Bal: '}${sym}${avail.toLocaleString('en-US',{minimumFractionDigits:2})}`;
         if(d.sourceBankId===bank.id) o.selected=true;
@@ -4897,8 +4906,9 @@ function buildMBItemModal(m){
         if(sb){
           const curBal=getBankBalance(sb); const expAmt=parseFloat(d.amount||0);
           const newBal=curBal-expAmt; const sym=sb.currency==='PHP'?'₱':'AED ';
+          const symImp=sb.currency==='PHP'?'₱':sb.currency==='USD'?'$':'AED ';
           const impDiv=document.createElement('div'); impDiv.style.cssText='font-size:12px;margin-top:6px;padding:7px 10px;border-radius:var(--radius-sm);background:'+(newBal<0?'var(--red-bg)':'var(--teal-bg)')+';';
-          impDiv.innerHTML=`After expense: <strong style="color:${newBal<0?'var(--red)':'var(--teal-d)'};">${sym}${newBal.toLocaleString('en-US',{minimumFractionDigits:2})}</strong> ${sb.type==='Credit Card'?'available':'balance'}${newBal<0?' ⚠ Over limit':''}`;
+          impDiv.innerHTML=`After expense: <strong style="color:${newBal<0?'var(--red)':'var(--teal-d)'};">${symImp}${newBal.toLocaleString('en-US',{minimumFractionDigits:2})}</strong> ${sb.type==='Credit Card'?'available':'balance'}${newBal<0?' ⚠ Over limit':''}`;
           bkDeductG.appendChild(impDiv);
         }
       }
@@ -5272,6 +5282,164 @@ function buildMBItemModal(m){
 window.openMBModal=openMBModal;
 
 // ── DAILY TAP PAGE ────────────────────────────────────────────────────────────
+// ── SUMMARY PAGE ─────────────────────────────────────────────────────────────
+// All Monthly Budget + Daily Tap entries combined, filterable by month
+function buildSummaryPage(){
+  const div=document.createElement('div');
+  const now=new Date();
+
+  // Default to next month
+  if(appState.summaryMonth===undefined||appState.summaryMonth===null){
+    const nm=new Date(now.getFullYear(),now.getMonth()+1,1);
+    appState.summaryMonth=nm.getMonth(); appState.summaryYear=nm.getFullYear();
+  }
+  const sm=appState.summaryMonth, sy=appState.summaryYear;
+
+  // ── Header with month filter ──────────────────────────────────────
+  const hdr=document.createElement('div'); hdr.className='page-header';
+  const htxt=document.createElement('div');
+  htxt.innerHTML=`<div class="page-title">📊 Summary</div><div class="page-sub">All transactions — ${MONTHS[sm]} ${sy}</div>`;
+  hdr.appendChild(htxt);
+  const hRight=document.createElement('div'); hRight.style.cssText='display:flex;gap:8px;align-items:center;';
+  const mSel=document.createElement('select'); mSel.className='form-select'; mSel.style.width='auto';
+  MONTHS.forEach((mn,i)=>{ const o=document.createElement('option'); o.value=i; o.textContent=mn; if(i===sm)o.selected=true; mSel.appendChild(o); });
+  mSel.addEventListener('change',e=>{ appState.summaryMonth=parseInt(e.target.value); render(); });
+  const ySel=document.createElement('select'); ySel.className='form-select'; ySel.style.width='auto';
+  for(let y=now.getFullYear()-2;y<=now.getFullYear()+2;y++){ const o=document.createElement('option'); o.value=y; o.textContent=y; if(y===sy)o.selected=true; ySel.appendChild(o); }
+  ySel.addEventListener('change',e=>{ appState.summaryYear=parseInt(e.target.value); render(); });
+  hRight.appendChild(mSel); hRight.appendChild(ySel); hdr.appendChild(hRight);
+  div.appendChild(hdr);
+
+  const enbdRate=getEnbdRate();
+  const fmtS=(a,cur)=>{ const s=cur==='PHP'?'₱':cur==='USD'?'$':'AED '; return s+parseFloat(a||0).toLocaleString('en-US',{minimumFractionDigits:2}); };
+  const toAEDeq=(amt,cur)=>{ const a=parseFloat(amt||0); return cur==='PHP'?a/enbdRate:cur==='USD'?a*3.6725:a; };
+
+  // ── Collect all entries for selected month ────────────────────────
+  const mbIncome=(appState.monthlyBudget||[]).filter(i=>i.type==='income'&&i.month===sm&&i.year===sy);
+  const mbExpense=(appState.monthlyBudget||[]).filter(i=>i.type==='expense'&&i.month===sm&&i.year===sy);
+  const tapEntries=(appState.dailyTap||[]).filter(t=>{
+    if(!t.date) return false;
+    const dd=new Date(t.date+'T00:00:00');
+    return dd.getMonth()===sm&&dd.getFullYear()===sy;
+  }).sort((a,b)=>b.date>a.date?1:-1);
+
+  // ── Stat cards ───────────────────────────────────────────────────
+  const totalMBInc=mbIncome.reduce((s,i)=>s+toAEDeq(i.amount,i.currency||'AED'),0);
+  const totalMBExp=mbExpense.reduce((s,i)=>s+toAEDeq(i.amount,i.currency||'AED'),0);
+  const totalTapIn=tapEntries.filter(t=>t.tapType==='in').reduce((s,t)=>s+toAEDeq(t.amount,t.currency||(appState.banks||[]).find(b=>b.id===t.bankId)?.currency||'AED'),0);
+  const totalTapOut=tapEntries.filter(t=>t.tapType==='out').reduce((s,t)=>s+toAEDeq(t.amount,t.currency||(appState.banks||[]).find(b=>b.id===t.bankId)?.currency||'AED'),0);
+  const totalIn=totalMBInc+totalTapIn;
+  const totalOut=totalMBExp+totalTapOut;
+  const net=totalIn-totalOut;
+
+  const sg=document.createElement('div'); sg.style.cssText='display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:1.25rem;';
+  sg.innerHTML=`
+    <div class="stat-card stat-card-income"><div class="stat-label">Income</div><div class="stat-value teal" style="font-size:18px">AED ${totalIn.toLocaleString('en-US',{minimumFractionDigits:2})}</div><div class="stat-sub">${mbIncome.length} budget · ${tapEntries.filter(t=>t.tapType==='in').length} tap</div></div>
+    <div class="stat-card stat-card-expense"><div class="stat-label">Expenses</div><div class="stat-value" style="color:var(--red);font-size:18px">AED ${totalOut.toLocaleString('en-US',{minimumFractionDigits:2})}</div><div class="stat-sub">${mbExpense.length} budget · ${tapEntries.filter(t=>t.tapType==='out').length} tap</div></div>
+    <div class="stat-card ${net>=0?'stat-card-balance-pos':'stat-card-balance-neg'}"><div class="stat-label">Net Balance</div><div class="stat-value" style="color:${net>=0?'var(--blue)':'var(--red)'};font-size:18px">${net>=0?'+':''}AED ${Math.abs(net).toLocaleString('en-US',{minimumFractionDigits:2})}</div><div class="stat-sub">${net>=0?'Surplus':'Deficit'}</div></div>
+    <div class="stat-card"><div class="stat-label">All Entries</div><div class="stat-value" style="font-size:18px">${mbIncome.length+mbExpense.length+tapEntries.length}</div><div class="stat-sub">Budget + Tap combined</div></div>`;
+  div.appendChild(sg);
+
+  // ── Filter pills: source + individual banks ───────────────────────
+  const filterRow=document.createElement('div'); filterRow.className='dt-bank-filter';
+  [
+    [null,'All'],
+    ['mb_income','💰 MB Income'],
+    ['mb_expense','🧾 MB Expense'],
+    ['tap','💳 Tap'],
+  ].forEach(([id,label])=>{
+    const pill=document.createElement('div'); pill.className='dt-bank-pill'+(appState.summaryBankFilter===id?' active':'');
+    pill.textContent=label;
+    pill.addEventListener('click',()=>{ appState.summaryBankFilter=id; render(); }); filterRow.appendChild(pill);
+  });
+  (appState.banks||[]).forEach(bank=>{
+    const pill=document.createElement('div'); pill.className='dt-bank-pill'+(appState.summaryBankFilter==='bank_'+bank.id?' active':'');
+    pill.innerHTML=`<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${bank.color||'#1D9E75'};margin-right:4px;"></span>${bank.name}`;
+    pill.addEventListener('click',()=>{ appState.summaryBankFilter='bank_'+bank.id; render(); }); filterRow.appendChild(pill);
+  });
+  div.appendChild(filterRow);
+
+  // ── Build unified row list ────────────────────────────────────────
+  const allRows=[];
+  const sf=appState.summaryBankFilter;
+
+  const showMBInc=!sf||sf==='mb_income';
+  const showMBExp=!sf||sf==='mb_expense';
+  const showTap=!sf||sf==='tap'||sf?.startsWith('bank_');
+
+  if(showMBInc) mbIncome.forEach(item=>{
+    const mn=String((item.month||0)+1).padStart(2,'0');
+    allRows.push({ _sort:`${item.year||sy}-${mn}-01`, date:`${item.year||sy}-${mn}-01`,
+      source:'MB', srcColor:'var(--teal)', srcBg:'var(--teal-bg)',
+      bank:'—', bankColor:'', description:item.label||item.category||'—',
+      tapType:'in', amount:parseFloat(item.amount||0), currency:item.currency||'AED',
+      category:item.category||'', isPH:item.isPHAllowance, notes:item.notes||'', autoLogged:false });
+  });
+  if(showMBExp) mbExpense.forEach(item=>{
+    const mn=String((item.month||0)+1).padStart(2,'0');
+    allRows.push({ _sort:`${item.year||sy}-${mn}-01`, date:`${item.year||sy}-${mn}-01`,
+      source:'MB', srcColor:'var(--red)', srcBg:'var(--red-bg)',
+      bank:'—', bankColor:'', description:item.label||item.category||'—',
+      tapType:'out', amount:parseFloat(item.amount||0), currency:item.currency||'AED',
+      category:item.category||'', isPH:item.isPHAllowance, notes:item.notes||'', autoLogged:false });
+  });
+  if(showTap){
+    let taps=tapEntries;
+    if(sf?.startsWith('bank_')){ const bid=sf.replace('bank_',''); taps=tapEntries.filter(t=>t.bankId===bid); }
+    taps.forEach(tap=>{
+      const bank=(appState.banks||[]).find(b=>b.id===tap.bankId);
+      const isIn=tap.tapType==='in';
+      allRows.push({ _sort:tap.date||'', date:tap.date||'',
+        source:'TAP', srcColor:isIn?'var(--teal)':'var(--red)', srcBg:isIn?'var(--teal-bg)':'var(--red-bg)',
+        bank:bank?bank.name:'—', bankColor:bank?.color||'', description:tap.description||'—',
+        tapType:tap.tapType, amount:parseFloat(tap.amount||0), currency:tap.currency||bank?.currency||'AED',
+        category:tap.tapPurpose||'', isPH:false, notes:tap.notes||'', autoLogged:!!tap.autoLogged });
+    });
+  }
+  allRows.sort((a,b)=>b._sort>a._sort?1:-1);
+
+  // ── Table ─────────────────────────────────────────────────────────
+  const card=document.createElement('div'); card.className='card';
+  if(!allRows.length){
+    card.innerHTML=`<div class="empty"><div class="empty-icon">📊</div><p>No entries for ${MONTHS[sm]} ${sy}. Add entries in Monthly Budget or Daily Tap.</p></div>`;
+  } else {
+    const tw=document.createElement('div'); tw.className='table-wrap';
+    const tbl=document.createElement('table');
+    tbl.innerHTML=`<thead><tr><th>Date</th><th>Source</th><th>Bank / Account</th><th>Description</th><th>Category</th><th>Type</th><th style="text-align:right">Amount</th><th>PHP Equiv.</th><th>Notes</th></tr></thead>`;
+    const tbody=document.createElement('tbody');
+    allRows.forEach(row=>{
+      const sym=row.currency==='PHP'?'₱':row.currency==='USD'?'$':'AED ';
+      const phpEq=row.currency==='PHP'
+        ?'₱'+row.amount.toLocaleString('en-US',{minimumFractionDigits:2})
+        :row.currency==='USD'
+          ?'≈ ₱'+(row.amount*3.6725*enbdRate).toLocaleString('en-US',{minimumFractionDigits:2})
+          :'≈ ₱'+(row.amount*enbdRate).toLocaleString('en-US',{minimumFractionDigits:2});
+      const autoTag=row.autoLogged?'<span style="font-size:9px;background:var(--teal-bg);color:var(--teal-d);padding:1px 5px;border-radius:4px;margin-left:4px;">AUTO</span>':'';
+      const phTag=row.isPH?'<span style="font-size:9px;background:var(--blue-bg);color:var(--blue);padding:1px 5px;border-radius:4px;margin-left:4px;">🇵🇭</span>':'';
+      const tr=document.createElement('tr');
+      tr.innerHTML=`
+        <td style="white-space:nowrap;font-size:12px">${budgetFmtDate(row.date)}</td>
+        <td><span style="font-size:10px;font-weight:600;padding:2px 7px;border-radius:100px;background:${row.srcBg};color:${row.srcColor}">${row.source}</span></td>
+        <td>${row.bankColor?`<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:8px;height:8px;border-radius:50%;background:${row.bankColor};display:inline-block;"></span>${row.bank}</span>`:row.bank}</td>
+        <td style="font-weight:500">${row.description}${autoTag}${phTag}</td>
+        <td style="font-size:11px;color:var(--muted)">${row.category||'—'}</td>
+        <td><span class="${row.tapType==='in'?'dt-type-in':'dt-type-out'}">${row.tapType==='in'?'▲ IN':'▼ OUT'}</span></td>
+        <td style="text-align:right;font-weight:600;color:${row.tapType==='in'?'var(--teal)':'var(--red)'}">${sym}${row.amount.toLocaleString('en-US',{minimumFractionDigits:2})}</td>
+        <td style="font-size:11px;color:var(--muted)">${phpEq}</td>
+        <td style="font-size:11px;color:var(--muted);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${row.notes}">${row.notes||'—'}</td>`;
+      tbody.appendChild(tr);
+    });
+    // Totals footer
+    const fIn=allRows.filter(r=>r.tapType==='in').reduce((s,r)=>s+toAEDeq(r.amount,r.currency),0);
+    const fOut=allRows.filter(r=>r.tapType==='out').reduce((s,r)=>s+toAEDeq(r.amount,r.currency),0);
+    const tf=document.createElement('tfoot'); tf.style.cssText='background:var(--bg);font-weight:600;border-top:2px solid var(--border);';
+    tf.innerHTML=`<tr><td colspan="6" style="padding:8px 12px;color:var(--muted);font-size:12px">${allRows.length} entries &nbsp;·&nbsp; AED equiv.</td><td style="text-align:right;padding:8px 12px;color:${fIn-fOut>=0?'var(--teal)':'var(--red)'}">AED ${(fIn-fOut).toLocaleString('en-US',{minimumFractionDigits:2})}</td><td colspan="2"></td></tr>`;
+    tbl.appendChild(tbody); tbl.appendChild(tf); tw.appendChild(tbl); card.appendChild(tw);
+  }
+  div.appendChild(card);
+  return div;
+}
+
 function buildDailyTapPage(){
   const div=document.createElement('div');
   const bm=appState.budgetMonth, by=appState.budgetYear;
