@@ -5325,8 +5325,18 @@ function buildSummaryPage(){
   const toAEDeq=(amt,cur)=>{ const a=parseFloat(amt||0); return cur==='PHP'?a/enbdRate:cur==='USD'?a*3.6725:a; };
 
   // ── Collect all entries for selected month ────────────────────────
-  const mbIncome=(appState.monthlyBudget||[]).filter(i=>i.type==='income'&&i.month===sm&&i.year===sy);
+  // IDs of MB income entries that already have an auto-tap — exclude MB row to avoid duplication
+  const autoTappedMBIds=new Set(
+    (appState.dailyTap||[])
+      .filter(t=>t.autoLogged&&t.srcId&&t.srcId.startsWith('mbinc_'))
+      .map(t=>t.srcId.replace('mbinc_',''))
+  );
+
+  const mbIncome=(appState.monthlyBudget||[]).filter(i=>i.type==='income'&&i.month===sm&&i.year===sy
+    &&!autoTappedMBIds.has(i.id)); // skip if already represented by an auto tap
   const mbExpense=(appState.monthlyBudget||[]).filter(i=>i.type==='expense'&&i.month===sm&&i.year===sy);
+  const mbIncomeAll=(appState.monthlyBudget||[]).filter(i=>i.type==='income'&&i.month===sm&&i.year===sy);
+  const autoTapCount=mbIncomeAll.length-mbIncome.length;
   const tapEntries=(appState.dailyTap||[]).filter(t=>{
     if(!t.date) return false;
     const dd=new Date(t.date+'T00:00:00');
