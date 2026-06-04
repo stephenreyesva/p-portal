@@ -5582,6 +5582,85 @@ function buildTapModal(m){
     }
   }
   m.appendChild(bkG);
+
+  // ── Credit Card Payment Flow ─────────────────────────────────────────────
+  // If selected bank is a CC and tap is OUT → offer "Pay from which bank?"
+  const selBankObjCC=(appState.banks||[]).find(b=>b.id===d.bankId);
+  const isCC=selBankObjCC&&selBankObjCC.type==='Credit Card';
+  if(isCC&&(d.tapType||'out')==='out'){
+    const ccFlowG=document.createElement('div'); ccFlowG.className='form-group';
+    ccFlowG.innerHTML='<label class="form-label">Payment Type <span style="color:var(--hint);font-size:11px;">Is this a regular CC expense or a CC bill payment?</span></label>';
+    const ccRow=document.createElement('div'); ccRow.style.cssText='display:flex;gap:8px;margin-bottom:10px;';
+    [['expense','🛒 Regular Expense'],['cc_payment','💸 CC Bill Payment']].forEach(([val,label])=>{
+      const btn=document.createElement('button'); btn.type='button';
+      btn.className='btn btn-sm'+((d.ccPaymentType||'expense')===val?' btn-primary':' btn-outline');
+      btn.textContent=label;
+      btn.addEventListener('click',()=>{ d.ccPaymentType=val; buildTapModal(m); });
+      ccRow.appendChild(btn);
+    });
+    ccFlowG.appendChild(ccRow);
+    // If CC bill payment — show which bank pays it
+    if(d.ccPaymentType==='cc_payment'){
+      const payBanks=(appState.banks||[]).filter(b=>b.id!==d.bankId&&b.type!=='Credit Card');
+      const fromG=document.createElement('div'); fromG.innerHTML='<label class="form-label">Pay from Bank <span style="color:var(--hint);font-size:11px;">(deducted from this account)</span></label>';
+      const fromSel=document.createElement('select'); fromSel.className='form-select';
+      const blankO=document.createElement('option'); blankO.value=''; blankO.textContent='— Select source bank —'; fromSel.appendChild(blankO);
+      payBanks.forEach(bank=>{
+        const avail=getBankBalance(bank);
+        const symB=bank.currency==='PHP'?'₱':bank.currency==='USD'?'$':'AED ';
+        const o=document.createElement('option'); o.value=bank.id;
+        o.textContent=`${bank.name}${bank.accountNo?' ●'+bank.accountNo.slice(-4):''} — Bal: ${symB}${avail.toLocaleString('en-US',{minimumFractionDigits:2})}`;
+        if(d.ccFromBankId===bank.id) o.selected=true; fromSel.appendChild(o);
+      });
+      fromSel.addEventListener('change',e=>{ d.ccFromBankId=e.target.value; buildTapModal(m); });
+      fromG.appendChild(fromSel); ccFlowG.appendChild(fromG);
+      // Preview of what will happen
+      if(d.ccFromBankId&&d.amount){
+        const fromBank=payBanks.find(b=>b.id===d.ccFromBankId);
+        if(fromBank){
+          const fromBal=getBankBalance(fromBank);
+          const ccBal=getBankBalance(selBankObjCC);
+          const amt=parseFloat(d.amount||0);
+          const symF=fromBank.currency==='PHP'?'₱':fromBank.currency==='USD'?'$':'AED ';
+          const symCC=selBankObjCC.currency==='PHP'?'₱':selBankObjCC.currency==='USD'?'$':'AED ';
+          const prev=document.createElement('div'); prev.style.cssText='margin-top:8px;padding:10px 12px;border-radius:var(--radius-sm);background:var(--blue-bg);border:1px solid #BFDBFE;font-size:12px;';
+          prev.innerHTML=`<div style="font-weight:600;color:var(--blue);margin-bottom:6px;">💳 CC Payment Preview</div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span>${fromBank.name} (source)</span><span style="color:var(--red);">${symF}${fromBal.toLocaleString('en-US',{minimumFractionDigits:2})} → ${symF}${(fromBal-amt).toLocaleString('en-US',{minimumFractionDigits:2})}</span></div>
+            <div style="display:flex;justify-content:space-between;"><span>${selBankObjCC.name} (CC balance)</span><span style="color:var(--teal-d);">${symCC}${Math.abs(ccBal).toLocaleString('en-US',{minimumFractionDigits:2})} owed → ${symCC}${Math.max(0,Math.abs(ccBal)-amt).toLocaleString('en-US',{minimumFractionDigits:2})} owed</span></div>`;
+          ccFlowG.appendChild(prev);
+        }
+      }
+    }
+    m.appendChild(ccFlowG);
+  }
+
+  // ── Bank Transfer Flow ───────────────────────────────────────────────────
+  // For non-CC OUT taps — option to mark as a transfer to another account
+  const selBankObjT=(appState.banks||[]).find(b=>b.id===d.bankId);
+  if(selBankObjT&&selBankObjT.type!=='Credit Card'&&(d.tapType||'out')==='out'){
+    const xferG=document.createElement('div'); xferG.className='form-group';
+    xferG.innerHTML='<label class="form-label">Transfer to account? <span style="color:var(--hint);font-size:11px;">Optional — adds a matching Tap In to another bank</span></label>';
+    const xferSel=document.createElement('select'); xferSel.className='form-select';
+    const xBlank=document.createElement('option'); xBlank.value=''; xBlank.textContent='— None (regular expense) —'; xferSel.appendChild(xBlank);
+    (appState.banks||[]).filter(b=>b.id!==d.bankId).forEach(bank=>{
+      const avail=getBankBalance(bank); const symB=bank.currency==='PHP'?'₱':bank.currency==='USD'?'$':'AED ';
+      const o=document.createElement('option'); o.value=bank.id;
+      o.textContent=`${bank.name}${bank.accountNo?' ●'+bank.accountNo.slice(-4):''} (${bank.type}) · Bal: ${symB}${avail.toLocaleString('en-US',{minimumFractionDigits:2})}`;
+      if(d.transferToBankId===bank.id) o.selected=true; xferSel.appendChild(o);
+    });
+    xferSel.addEventListener('change',e=>{ d.transferToBankId=e.target.value; buildTapModal(m); });
+    xferG.appendChild(xferSel);
+    if(d.transferToBankId&&d.amount){
+      const toBank=(appState.banks||[]).find(b=>b.id===d.transferToBankId);
+      if(toBank){
+        const xPrev=document.createElement('div'); xPrev.style.cssText='margin-top:6px;padding:7px 10px;border-radius:4px;background:var(--teal-bg);font-size:11px;color:var(--teal-d);';
+        xPrev.innerHTML=`✓ Will auto-create a matching Tap IN on <strong>${toBank.name}</strong> for the same amount`;
+        xferG.appendChild(xPrev);
+      }
+    }
+    m.appendChild(xferG);
+  }
+
   // ── PH Bank special flow (GCash / Maya / UB) ────────────────────────────
   const selBankObj=(appState.banks||[]).find(b=>b.id===d.bankId);
   const isPHBank=selBankObj&&(selBankObj.currency==='PHP'||['gcash','maya','ub'].some(k=>selBankObj.name.toLowerCase().includes(k)));
@@ -5643,6 +5722,32 @@ function buildTapModal(m){
     if(!d.amount){toast('Enter an amount');return;}
     const idx=(appState.dailyTap||[]).findIndex(t=>t.id===d.id);
     if(idx>-1) appState.dailyTap[idx]={...d}; else { if(!appState.dailyTap) appState.dailyTap=[]; appState.dailyTap.push({...d}); }
+
+    // ── CC Bill Payment: auto-create Tap OUT on source bank ─────────────────
+    if(d.ccPaymentType==='cc_payment'&&d.ccFromBankId&&d.amount){
+      const fromBank=(appState.banks||[]).find(b=>b.id===d.ccFromBankId);
+      const ccBank=(appState.banks||[]).find(b=>b.id===d.bankId);
+      if(fromBank){
+        const pairedId='tap_ccpay_'+d.id;
+        const existing=(appState.dailyTap||[]).findIndex(t=>t.srcId===pairedId);
+        const pairedTap={id:existing>-1?appState.dailyTap[existing].id:'tap_'+Date.now()+'_ccfrom',srcId:pairedId,bankId:d.ccFromBankId,date:d.date,description:`CC Payment → ${ccBank?.name||'CC'} (${d.description||''})`,tapType:'out',amount:d.amount,currency:fromBank.currency||'AED',notes:`Auto: paid ${ccBank?.name||'CC'} from ${fromBank.name}`,autoLogged:true};
+        if(existing>-1) appState.dailyTap[existing]={...pairedTap}; else appState.dailyTap.push(pairedTap);
+        toast(`✓ CC Payment logged · ${fromBank.name} debited`);
+      }
+    }
+
+    // ── Bank Transfer: auto-create matching Tap IN on destination bank ───────
+    if(d.transferToBankId&&d.amount&&d.tapType==='out'&&d.ccPaymentType!=='cc_payment'){
+      const toBank=(appState.banks||[]).find(b=>b.id===d.transferToBankId);
+      const fromBank=(appState.banks||[]).find(b=>b.id===d.bankId);
+      if(toBank){
+        const pairedId='tap_xfer_'+d.id;
+        const existing=(appState.dailyTap||[]).findIndex(t=>t.srcId===pairedId);
+        const pairedTap={id:existing>-1?appState.dailyTap[existing].id:'tap_'+Date.now()+'_xferto',srcId:pairedId,bankId:d.transferToBankId,date:d.date,description:`Transfer from ${fromBank?.name||'Bank'} (${d.description||''})`,tapType:'in',amount:d.amount,currency:toBank.currency||'AED',notes:`Auto: transfer from ${fromBank?.name||'Bank'}`,autoLogged:true};
+        if(existing>-1) appState.dailyTap[existing]={...pairedTap}; else appState.dailyTap.push(pairedTap);
+        toast(`✓ Transfer logged · ${toBank.name} credited`);
+      }
+    }
     // Auto-mark member allowance as sent in Monthly Budget
     if(d.tapPurpose==='allowance'&&d.tapMemberId){
       const fm=(appState.familyMembers||[]).find(f=>f.id===d.tapMemberId);
