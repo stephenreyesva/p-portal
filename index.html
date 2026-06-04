@@ -3477,7 +3477,7 @@ function buildDashboardSummaryPanels(bm, by, cur){
   // ── INCOME summary panel ───────────────────────────────────────
   const incPanel=document.createElement('div'); incPanel.className='db-panel';
   const incItems = mbItems.filter(i=>i.type==='income');
-  const _toAEDi=(item)=>{ const a=parseFloat(item.amount||0); return item.currency==='PHP'?a/enbdRate:a; };
+  const _toAEDi=(item)=>{ const a=parseFloat(item.amount||0); if(item.currency==='PHP') return a/enbdRate; if(item.currency==='USD') return a*(fxRates.AED||3.6725); return a; };
   const totalInc = incItems.reduce((s,i)=>s+_toAEDi(i),0);
   const diItems = dashInc;
   const diTotal = diItems.reduce((s,i)=>s+_toAEDi(i),0);
@@ -3550,7 +3550,7 @@ function buildDashboardSummaryPanels(bm, by, cur){
   const otherExp = mbItems.filter(i=>i.type==='expense'&&!i.isPHAllowance);
   const bankExpItems = dashExp.filter(e=>e.groupId==='bank');
   const otherExpItems = [...otherExp, ...dashExp.filter(e=>e.groupId==='other')];
-  const _toAEDd=(item)=>{ const a=parseFloat(item.amount||0); return item.currency==='PHP'?a/enbdRate:a; };
+  const _toAEDd=(item)=>{ const a=parseFloat(item.amount||0); if(item.currency==='PHP') return a/enbdRate; if(item.currency==='USD') return a*(fxRates.AED||3.6725); return a; };
   const allExpTotal = mbItems.filter(i=>i.type==='expense').reduce((s,i)=>s+_toAEDd(i),0) + dashExp.reduce((s,i)=>s+_toAEDd(i),0);
 
   const expPanel=document.createElement('div'); expPanel.className='db-panel';
@@ -4194,7 +4194,7 @@ function printMemberBudget(fm, bm, by, enbdRate){
   const allMemberExpenses=mbItems.filter(i=>i.type==='expense'&&i.label&&i.label.toLowerCase().includes(memberName));
 
   // Helper: convert any item amount to AED correctly
-  function toAED(item){ const a=parseFloat(item.amount||0); if(item.currency==='PHP') return a/enbdRate; return a; }
+  function toAED(item){ const a=parseFloat(item.amount||0); if(item.currency==='PHP') return a/enbdRate; if(item.currency==='USD') return a*(fxRates.AED||3.6725); return a; }
   function toPHP(item){ const a=parseFloat(item.amount||0); if(item.currency==='PHP') return a; return a*enbdRate; }
   function fmtAED(item){ const a=toAED(item); return 'AED '+a.toLocaleString('en-US',{minimumFractionDigits:2}); }
   function fmtPHP(item){ const p=toPHP(item); return '₱'+p.toLocaleString('en-US',{minimumFractionDigits:2}); }
@@ -4652,12 +4652,14 @@ function buildMonthlyBudgetPage(){
   const income=mItems.filter(i=>i.type==='income');
   const expenses=mItems.filter(i=>i.type==='expense');
   // Convert everything to AED for totals (PHP entries divided by ENBD rate)
-  const toAED=(item)=>{ const a=parseFloat(item.amount||0); return item.currency==='PHP'?a/enbdRate:a; };
+  const toAED=(item)=>{ const a=parseFloat(item.amount||0); if(item.currency==='PHP') return a/enbdRate; if(item.currency==='USD') return a*(fxRates.AED||3.6725); return a; };
   const toSym=(c)=>c==='PHP'?'₱':c==='USD'?'$':'AED ';
   const totalInAED=income.reduce((s,i)=>s+toAED(i),0);
   const totalExAED=expenses.reduce((s,i)=>s+toAED(i),0);
   // Also keep native per-currency sums for display
   const totalInPHP_native=income.filter(i=>i.currency==='PHP').reduce((s,i)=>s+(parseFloat(i.amount)||0),0);
+  const totalInUSD_native=income.filter(i=>i.currency==='USD').reduce((s,i)=>s+(parseFloat(i.amount)||0),0);
+  const totalExUSD_native=expenses.filter(i=>i.currency==='USD').reduce((s,i)=>s+(parseFloat(i.amount)||0),0);
   const totalExPHP_native=expenses.filter(i=>i.currency==='PHP').reduce((s,i)=>s+(parseFloat(i.amount)||0),0);
   const hasIncPHP=income.some(i=>i.currency==='PHP');
   const hasExpPHP=expenses.some(i=>i.currency==='PHP');
@@ -4689,8 +4691,12 @@ function buildMonthlyBudgetPage(){
     const sym=c==='PHP'?'₱':c==='USD'?'$':'AED ';
     return sym+parseFloat(amt||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
   };
-  const incLabel=hasIncPHP&&totalInAED>0?`~AED ${totalInAED.toLocaleString('en-US',{minimumFractionDigits:2})}`:hasIncPHP?`₱${totalInPHP_native.toLocaleString('en-US',{minimumFractionDigits:2})}`:`AED ${totalInAED.toLocaleString('en-US',{minimumFractionDigits:2})}`;
-  const expLabel=hasExpPHP&&totalExAED>0?`~AED ${totalExAED.toLocaleString('en-US',{minimumFractionDigits:2})}`:hasExpPHP?`₱${totalExPHP_native.toLocaleString('en-US',{minimumFractionDigits:2})}`:`AED ${totalExAED.toLocaleString('en-US',{minimumFractionDigits:2})}`;
+  const hasIncUSD=income.some(i=>i.currency==='USD');
+  const hasExpUSD=expenses.some(i=>i.currency==='USD');
+  const hasIncMixed=hasIncPHP||hasIncUSD;
+  const hasExpMixed=hasExpPHP||hasExpUSD;
+  const incLabel=hasIncMixed&&totalInAED>0?`~AED ${totalInAED.toLocaleString('en-US',{minimumFractionDigits:2})}`:hasIncPHP?`₱${totalInPHP_native.toLocaleString('en-US',{minimumFractionDigits:2})}`:`AED ${totalInAED.toLocaleString('en-US',{minimumFractionDigits:2})}`;
+  const expLabel=hasExpMixed&&totalExAED>0?`~AED ${totalExAED.toLocaleString('en-US',{minimumFractionDigits:2})}`:hasExpPHP?`₱${totalExPHP_native.toLocaleString('en-US',{minimumFractionDigits:2})}`:`AED ${totalExAED.toLocaleString('en-US',{minimumFractionDigits:2})}`;
   const netLabel=(netBal>=0?'+':'')+`AED ${Math.abs(netBal).toLocaleString('en-US',{minimumFractionDigits:2})}`;
   sg.innerHTML=`
     <div class="stat-card stat-card-income"><div class="stat-label">Total Income</div><div class="stat-value teal">${incLabel}</div><div class="stat-sub">${income.length} source${income.length!==1?'s':''}</div></div>
@@ -4737,7 +4743,10 @@ function buildMonthlyBudgetPage(){
 function buildMBRow(item, enbdRate, fmtMB){
   const row=document.createElement('div'); row.className='mb-row';
   const sym=item.currency==='PHP'?'₱':item.currency==='USD'?'$':'AED ';
-  const phpConv=(item.currency==='AED'&&(item.isPHAllowance||item.showPHP))?' ≈ ₱'+(parseFloat(item.amount||0)*enbdRate).toLocaleString('en-US',{minimumFractionDigits:2}):'';
+  const _mbAmt=parseFloat(item.amount||0);
+  const _mbAED=item.currency==='PHP'?_mbAmt/enbdRate:item.currency==='USD'?_mbAmt*(fxRates.AED||3.6725):_mbAmt;
+  const phpConv=(item.isPHAllowance||item.showPHP)?' ≈ ₱'+(_mbAED*enbdRate).toLocaleString('en-US',{minimumFractionDigits:2}):'';
+  const aedConv=item.currency==='USD'?` = AED ${_mbAED.toLocaleString('en-US',{minimumFractionDigits:2})}`:item.currency==='PHP'?` = AED ${_mbAED.toLocaleString('en-US',{minimumFractionDigits:2})}`:'';
   // Check if auto-logged to daily tap
   const hasTap=item.type==='income'&&(appState.dailyTap||[]).some(t=>t.srcId==='mbinc_'+item.id);
   const tapBadge=hasTap?'<span style="font-size:9px;background:var(--teal-bg);color:var(--teal-d);padding:1px 6px;border-radius:4px;margin-left:4px;vertical-align:middle;">→ TAP</span>':'';
@@ -4747,6 +4756,7 @@ function buildMBRow(item, enbdRate, fmtMB){
     ${item.isPHAllowance?'<span class="mb-ph-badge">🇵🇭 PH Allowance</span>':''}
     <div style="text-align:right;min-width:110px;">
       <div class="mb-row-amount" style="color:${item.type==='income'?'var(--teal)':'var(--red)'}">${sym}${parseFloat(item.amount||0).toLocaleString('en-US',{minimumFractionDigits:2})}</div>
+      ${aedConv?`<div style="font-size:10px;color:var(--muted);text-align:right;">${aedConv}</div>`:''}
       ${phpConv?`<div class="mb-row-php">${phpConv}</div>`:''}
     </div>
     ${item.isPHAllowance?`<span class="mb-sent-badge" style="background:${item.sent?'var(--teal-bg)':'var(--amber-bg)'};color:${item.sent?'var(--teal-d)':'var(--amber)'}">${item.sent?'✓ Sent':'Pending'}</span>`:''}`;
