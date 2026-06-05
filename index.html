@@ -2682,18 +2682,6 @@ function buildBudgetTracker(){
   const htxt=document.createElement('div');
   htxt.innerHTML=`<div class="page-title">Budget Tracker</div><div class="page-sub"><span style="background:var(--amber-bg);color:var(--amber);font-size:10px;font-weight:600;padding:2px 7px;border-radius:100px;margin-right:6px;">NEXT MONTH PLAN</span>${MONTHS[bm]} ${by} &nbsp;&middot;&nbsp; ${CURRENCIES[cur].flag} ${CURRENCIES[cur].name}</div>`;
   hdr.appendChild(htxt);
-  const hdrRight=document.createElement('div'); hdrRight.style.cssText='display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
-  const ms=document.createElement('div'); ms.className='month-selector no-print';
-  const mSel=document.createElement('select');
-  MONTHS.forEach((m,i)=>{ const o=document.createElement('option'); o.value=i; o.textContent=m; if(i===bm)o.selected=true; mSel.appendChild(o); });
-  mSel.addEventListener('change',e=>{ appState.budgetMonth=parseInt(e.target.value); render(); });
-  const ySel=document.createElement('select');
-  const curY=now.getFullYear();
-  for(let y=curY-2;y<=curY+1;y++){ const o=document.createElement('option'); o.value=y; o.textContent=y; if(y===by)o.selected=true; ySel.appendChild(o); }
-  ySel.addEventListener('change',e=>{ appState.budgetYear=parseInt(e.target.value); render(); });
-  ms.appendChild(mSel); ms.appendChild(ySel);
-  hdrRight.appendChild(ms);
-  hdr.appendChild(hdrRight);
   div.appendChild(hdr);
 
   // ── Stats row (shown only on Dashboard sub-tab, not duplicated here)
@@ -4376,17 +4364,16 @@ function getBankBalance(bank){
   const taps = (appState.dailyTap||[]).filter(t=>t.bankId===bank.id);
   const tapOut = taps.filter(t=>t.tapType==='out').reduce((s,t)=>s+(parseFloat(t.amount)||0),0);
   const tapIn  = taps.filter(t=>t.tapType==='in' ).reduce((s,t)=>s+(parseFloat(t.amount)||0),0);
-  // Debts linked to this bank
+  // Only include debts that have NO corresponding tap entry (not yet reflected in taps)
+  const tapSrcIds=new Set(taps.map(t=>t.srcId||''));
   const debtUsed=(appState.manualDebts||[])
-    .filter(d=>d.bankId===bank.id&&d.status!=='settled')
+    .filter(d=>d.bankId===bank.id&&d.status!=='settled'&&!tapSrcIds.has('mb_'+d.id)&&!tapSrcIds.has('tap_ccpay_'+d.id))
     .reduce((s,d)=>s+(parseFloat(d.totalAmount||0)-parseFloat(d.paidAmount||0)),0);
 
   if(bank.type==='Credit Card'){
-    // Available = Credit Limit - tap-outs - outstanding debts + tap-ins (payments)
     const limit = parseFloat(bank.creditLimit||bank.balance||0);
     return limit - tapOut - debtUsed + tapIn;
   } else {
-    // Regular: opening balance + tap-ins - tap-outs
     const opening = parseFloat(bank.balance||0);
     return opening + tapIn - tapOut;
   }
@@ -4396,8 +4383,9 @@ function getBankUsed(bank){
   const taps = (appState.dailyTap||[]).filter(t=>t.bankId===bank.id);
   const tapOut = taps.filter(t=>t.tapType==='out').reduce((s,t)=>s+(parseFloat(t.amount)||0),0);
   const tapIn  = taps.filter(t=>t.tapType==='in' ).reduce((s,t)=>s+(parseFloat(t.amount)||0),0);
+  const tapSrcIds=new Set(taps.map(t=>t.srcId||''));
   const debtUsed=(appState.manualDebts||[])
-    .filter(d=>d.bankId===bank.id&&d.status!=='settled')
+    .filter(d=>d.bankId===bank.id&&d.status!=='settled'&&!tapSrcIds.has('mb_'+d.id)&&!tapSrcIds.has('tap_ccpay_'+d.id))
     .reduce((s,d)=>s+(parseFloat(d.totalAmount||0)-parseFloat(d.paidAmount||0)),0);
   return tapOut + debtUsed - tapIn;
 }
@@ -5544,7 +5532,12 @@ function buildDailyTapPage(){
         <td style="white-space:nowrap;display:flex;gap:4px;padding-top:6px;"></td>`;
       const ac=tr.cells[6];
       const editBtn=document.createElement('button'); editBtn.className='btn btn-outline btn-sm'; editBtn.textContent='Edit'; editBtn.addEventListener('click',()=>openTapModal(tap));
-      const delBtn=document.createElement('button'); delBtn.className='delbtn'; delBtn.innerHTML='&times;'; delBtn.addEventListener('click',()=>{ if(confirm('Delete?')){ appState.dailyTap=appState.dailyTap.filter(t=>t.id!==tap.id); saveLocal(); toast('Deleted'); render(); } });
+      const delBtn=document.createElement('button'); delBtn.className='delbtn'; delBtn.innerHTML='&times;'; delBtn.addEventListener('click',()=>{
+        if(!confirm('Delete this tap record?')) return;
+        const pairedSrcIds=['tap_ccpay_'+tap.id,'tap_xfer_'+tap.id];
+        appState.dailyTap=appState.dailyTap.filter(t=>t.id!==tap.id&&!pairedSrcIds.includes(t.srcId||''));
+        saveLocal(); toast('Deleted'); render();
+      });
       ac.appendChild(editBtn); ac.appendChild(delBtn);
       tbody.appendChild(tr);
     });
@@ -5762,7 +5755,13 @@ function buildTapModal(m){
     }
     saveLocal(); appState.modal=null; toast(isEdit?'Tap updated!':'Tap added!'); render();
   });
-  if(isEdit){ const del=document.createElement('button'); del.className='btn btn-danger'; del.textContent='Delete'; del.addEventListener('click',()=>{ appState.dailyTap=appState.dailyTap.filter(t=>t.id!==d.id); saveLocal(); appState.modal=null; toast('Deleted'); render(); }); foot.appendChild(del); }
+  if(isEdit){ const del=document.createElement('button'); del.className='btn btn-danger'; del.textContent='Delete';
+    del.addEventListener('click',()=>{
+      if(!confirm('Delete this tap and any auto-paired entries?')) return;
+      const pairedSrcIds=['tap_ccpay_'+d.id,'tap_xfer_'+d.id];
+      appState.dailyTap=appState.dailyTap.filter(t=>t.id!==d.id&&!pairedSrcIds.includes(t.srcId||''));
+      saveLocal(); appState.modal=null; toast('Deleted'); render();
+    }); foot.appendChild(del); }
   foot.appendChild(cancel); foot.appendChild(save); m.appendChild(foot);
 }
 window.openTapModal=openTapModal;
